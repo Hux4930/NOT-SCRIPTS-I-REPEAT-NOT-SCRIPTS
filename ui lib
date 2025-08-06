@@ -1,4 +1,3 @@
-
 local WIDTH = 300
 local buttonHeight = 30
 local buttonSpacing = 5
@@ -40,7 +39,7 @@ title.Parent = backdrop
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
 closeButton.Size = UDim2.new(0, 28, 0, 22)               -- width x height
-closeButton.Position = UDim2.new(0, 6, 0, (titleHeight - 22) / 2) -- a little padding and vertically centered inside title
+closeButton.Position = UDim2.new(0.87, 6, 0, (titleHeight - 22) / 2) -- a little padding and vertically centered inside title
 closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 closeButton.BorderSizePixel = 0
 closeButton.Text = "X"
