@@ -1,0 +1,224 @@
+-- LocalScript: MoveForwardGUI_withTextBox
+-- Recommended location: StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Config
+local STEP_DISTANCE = 1          -- default studs moved each step
+local STEP_INTERVAL = 0.1        -- seconds between teleports when enabled
+local MIN_DISTANCE = 0           -- minimum allowed studs
+local MAX_DISTANCE = 500000000000          -- maximum allowed studs
+
+-- Determine or create a ScreenGui
+local screenGui
+if script.Parent and script.Parent:IsA("ScreenGui") then
+    screenGui = script.Parent
+else
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "MoveForwardGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = playerGui
+end
+
+-- UI Creation
+local frame = Instance.new("Frame")
+frame.Name = "MainFrame"
+frame.Size = UDim2.new(0, 240, 0, 120)
+frame.Position = UDim2.new(0.5, -120, 0.1, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+frame.Active = true -- needed to receive input for dragging
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, -10, 0, 26)
+title.Position = UDim2.new(0, 5, 0, 5)
+title.BackgroundTransparency = 1
+title.Text = "Forward Teleport"
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = frame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleButton"
+toggleBtn.Size = UDim2.new(0.45, -6, 0, 34)
+toggleBtn.Position = UDim2.new(0, 8, 0, 36)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+toggleBtn.Text = "Enable"
+toggleBtn.Font = Enum.Font.SourceSans
+toggleBtn.TextSize = 16
+toggleBtn.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "Status"
+statusLabel.Size = UDim2.new(0.45, -6, 0, 34)
+statusLabel.Position = UDim2.new(0.55, -8, 0, 36)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.fromRGB(200,200,200)
+statusLabel.Text = "Off"
+statusLabel.Font = Enum.Font.SourceSans
+statusLabel.TextSize = 16
+statusLabel.TextXAlignment = Enum.TextXAlignment.Right
+statusLabel.Parent = frame
+
+-- Distance input UI
+local distLabel = Instance.new("TextLabel")
+distLabel.Name = "DistLabel"
+distLabel.Size = UDim2.new(0, 80, 0, 28)
+distLabel.Position = UDim2.new(0, 8, 0, 78)
+distLabel.BackgroundTransparency = 1
+distLabel.TextColor3 = Color3.fromRGB(220,220,220)
+distLabel.Text = "Distance:"
+distLabel.Font = Enum.Font.SourceSans
+distLabel.TextSize = 14
+distLabel.TextXAlignment = Enum.TextXAlignment.Left
+distLabel.Parent = frame
+
+local distBox = Instance.new("TextBox")
+distBox.Name = "DistBox"
+distBox.Size = UDim2.new(0, 120, 0, 28)
+distBox.Position = UDim2.new(0, 90, 0, 78)
+distBox.PlaceholderText = tostring(STEP_DISTANCE)
+distBox.Text = tostring(STEP_DISTANCE)
+distBox.ClearTextOnFocus = false
+distBox.Font = Enum.Font.SourceSans
+distBox.TextSize = 14
+distBox.TextColor3 = Color3.fromRGB(0,0,0)
+distBox.BackgroundColor3 = Color3.fromRGB(230,230,230)
+distBox.Parent = frame
+
+local msgLabel = Instance.new("TextLabel")
+msgLabel.Name = "Msg"
+msgLabel.Size = UDim2.new(1, -10, 0, 16)
+msgLabel.Position = UDim2.new(0, 5, 0, 104)
+msgLabel.BackgroundTransparency = 1
+msgLabel.TextColor3 = Color3.fromRGB(200,120,120)
+msgLabel.Text = ""
+msgLabel.Font = Enum.Font.SourceSans
+msgLabel.TextSize = 13
+msgLabel.TextXAlignment = Enum.TextXAlignment.Left
+msgLabel.Parent = frame
+
+-- Make frame draggable
+local dragging, dragStart, startPos
+local function onInputBegan(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        -- Only start dragging if clicked on the frame (not on textboxes/buttons)
+        local mousePos = input.Position
+        dragging = true
+        dragStart = mousePos
+        startPos = frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end
+local function onInputChanged(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        frame.Position = newPos
+    end
+end
+
+frame.InputBegan:Connect(onInputBegan)
+UserInputService.InputChanged:Connect(onInputChanged)
+
+-- Toggle logic
+local enabled = false
+local lastStep = 0
+
+local function setEnabled(val)
+    enabled = val
+    if enabled then
+        toggleBtn.Text = "Disable"
+        statusLabel.Text = "On"
+    else
+        toggleBtn.Text = "Enable"
+        statusLabel.Text = "Off"
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    setEnabled(not enabled)
+end)
+
+-- Keyboard hotkey (T)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.T then
+        setEnabled(not enabled)
+    end
+end)
+
+-- Helper: parse and validate distance string, return number or nil
+local function parseDistance(str)
+    if not str then return nil end
+    -- trim
+    str = str:match("^%s*(.-)%s*$")
+    if str == "" then return nil end
+    local num = tonumber(str)
+    if not num then return nil end
+    -- clamp
+    if num < MIN_DISTANCE then num = MIN_DISTANCE end
+    if num > MAX_DISTANCE then num = MAX_DISTANCE end
+    return num
+end
+
+-- When TextBox loses focus or Enter pressed, update STEP_DISTANCE
+distBox.FocusLost:Connect(function(enterPressed)
+    local newVal = parseDistance(distBox.Text)
+    if newVal then
+        STEP_DISTANCE = newVal
+        distBox.Text = tostring(STEP_DISTANCE)
+        distBox.PlaceholderText = tostring(STEP_DISTANCE)
+        msgLabel.Text = ""
+    else
+        -- invalid input -> show message and reset textbox to previous value
+        msgLabel.Text = ("Invalid distance (use number %.1f-%.0f)"):format(MIN_DISTANCE, MAX_DISTANCE)
+        distBox.Text = tostring(STEP_DISTANCE)
+    end
+end)
+
+-- Also allow immediate change when user presses Return (some platforms send FocusLost with enterPressed true)
+distBox.FocusLost:Connect(function(enterPressed)
+    -- already handled above; kept for compatibility
+end)
+
+-- Teleport loop (client-side)
+RunService.Heartbeat:Connect(function(dt)
+    if not enabled then return end
+    lastStep = lastStep + dt
+    if lastStep < STEP_INTERVAL then return end
+    lastStep = 0
+
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local look = hrp.CFrame.LookVector
+    local desiredPos = hrp.Position + look.Unit * STEP_DISTANCE
+    -- Keep character upright and facing same direction
+    local newCFrame = CFrame.new(desiredPos, desiredPos + look.Unit)
+    hrp.CFrame = newCFrame
+end)
+
+player.CharacterRemoving:Connect(function()
+    setEnabled(false)
+end)
+
+-- Init
+setEnabled(false)
