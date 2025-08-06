@@ -163,3 +163,14 @@ screenGui.AncestryChanged:Connect(function(child, parent)
         end
     end
 end)
+-- GUI toggle with Left Alt key
+local guiVisible = true
+local toggleKey = Enum.KeyCode.LeftAlt
+
+UIS.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == toggleKey then
+        guiVisible = not guiVisible
+        screenGui.Enabled = guiVisible
+    end
+end)
