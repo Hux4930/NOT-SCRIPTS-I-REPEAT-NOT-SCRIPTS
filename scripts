@@ -243,3 +243,14 @@ end)
 
 -- Init
 setEnabled(false)
+-- Left Alt key toggles GUI visibility
+local guiVisible = true
+local toggleKey = Enum.KeyCode.LeftAlt
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == toggleKey then
+        guiVisible = not guiVisible
+        screenGui.Enabled = guiVisible
+    end
+end)
