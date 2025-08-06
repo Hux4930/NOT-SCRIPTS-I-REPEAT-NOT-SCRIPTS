@@ -48,6 +48,27 @@ title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
 
+-- ** Close button **
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 24, 0, 20)
+closeButton.Position = UDim2.new(0, 6, 0, 6)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.BorderSizePixel = 0
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.TextSize = 18
+closeButton.AutoButtonColor = true
+closeButton.Parent = frame
+
+closeButton.MouseButton1Click:Connect(function()
+    if screenGui and screenGui.Parent then
+        screenGui:Destroy()
+    end
+end)
+-- ** End Close button **
+
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleButton"
 toggleBtn.Size = UDim2.new(0.45, -6, 0, 34)
