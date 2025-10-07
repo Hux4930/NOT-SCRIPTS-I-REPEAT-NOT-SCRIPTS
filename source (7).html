@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+            <style>.lw { font-size: 60px; }</style>
+        </head>
+        <body>
+            
+
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roblox Button Config Builder</title>
+<style>
+:root{--bg:#071022;--card:#0f1724;--muted:#9aa4b2;--accent:#60a5fa}
+*{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+body{margin:0;background:linear-gradient(180deg,var(--bg),#03101a);color:#e6eef6;min-height:100vh;padding:20px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:420px 1fr;gap:20px}
+.card{background:linear-gradient(180deg,var(--card),#071425);padding:16px;border-radius:10px;box-shadow:0 6px 24px rgba(2,6,23,.6)}
+h1{margin:0 0 10px 0;font-size:18px}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+input[type=text],input[type=color],textarea{width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,.04);background:rgba(255,255,255,0.04);color:inherit;font-size:14px}
+button{background:var(--accent);border:0;padding:8px 10px;border-radius:8px;color:#04212a;cursor:pointer;font-weight:600}
+.list{max-height:66vh;overflow:auto;padding-right:6px;margin-top:12px}
+.item{border:1px solid rgba(255,255,255,.03);padding:10px;border-radius:8px;margin-bottom:8px;background:rgba(255,255,255,0.02)}
+.item .top{display:flex;align-items:center;gap:8px}
+.item textarea{margin-top:6px;resize:vertical;min-height:60px}
+.small{font-size:12px;color:var(--muted)}
+.preview{padding:12px;display:flex;flex-direction:column;gap:8px;min-height:120px}
+.preview .button{height:36px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#fff}
+.small-btn{background:transparent;border:1px solid rgba(255,255,255,.08);color:inherit;padding:6px;border-radius:6px;cursor:pointer}
+pre{background:#071425;padding:10px;border-radius:6px;overflow:auto;color:#cbe6ff;white-space:pre-wrap}
+</style>
+
+
+<div class="wrap">
+<div class="card">
+<h1>Roblox Button Config Builder</h1>
+<div style="margin-top:12px"><label>Project name</label><input id="projectName" type="text" value="MyButtonConfig"></div>
+<div style="display:flex;gap:8px;margin-top:12px;align-items:center"><button id="addButton">+ Add Button</button><button id="loadSample" class="small-btn">Load Sample</button></div>
+<div class="list" id="buttonList"></div>
+</div>
+<div class="card">
+<h1>Preview &amp; Export</h1>
+<label>Preview</label>
+<div class="preview" id="previewArea"></div>
+<label>Export JSON</label>
+<pre id="jsonOut">{
+  "projectName": "MyButtonConfig",
+  "buttons": []
+}</pre>
+<button id="copyJson" class="small-btn">Copy JSON</button>
+<label style="margin-top:12px">Export Lua</label>
+<pre id="luaOut">_G.buttonswhattheydo = {
+}
+_G.buttons = #_G.buttonswhattheydo</pre>
+<button id="copyLua" class="small-btn">Copy Lua</button>
+</div>
+</div>
+<script>
+let state={projectName:"MyButtonConfig",buttons:[]}
+const el=id=>document.getElementById(id)
+function escapeLua(str){return(str||"").replace(/\\/g,"\\\\").replace(/\"/g,"\\\"")}
+function hexToRgb(hex){hex=hex.replace("#","");if(hex.length===3)hex=hex.split("").map(c=>c+c).join("");const num=parseInt(hex,16);return[(num>>16)&255,(num>>8)&255,num&255]}
+function colorToLua(hex){const[r,g,b]=hexToRgb(hex);return`Color3.fromRGB(${r},${g},${b})`}
+function updateExportsAndPreview(){renderPreview();renderExports()}
+function renderList(){const list=el("buttonList");list.innerHTML="";state.buttons.forEach((b,i)=>{const item=document.createElement("div");item.className="item";const top=document.createElement("div");top.className="top";const name=document.createElement("input");name.type="text";name.value=b.name;name.oninput=e=>{b.name=e.target.value;updateExportsAndPreview()};const color=document.createElement("input");color.type="color";color.value=b.color||"#323232";const updateColor=e=>{b.color=e.target.value;updateExportsAndPreview()};color.addEventListener("input",updateColor);color.addEventListener("change",updateColor);const del=document.createElement("button");del.className="small-btn";del.textContent="Delete";del.onclick=()=>{state.buttons.splice(i,1);renderAll()};top.appendChild(name);top.appendChild(color);top.appendChild(del);item.appendChild(top);const funcLabel=document.createElement("label");funcLabel.className="small";funcLabel.textContent="What this button does:";item.appendChild(funcLabel);const funcBox=document.createElement("textarea");funcBox.value=b.funcPlaceholder;funcBox.oninput=e=>{b.funcPlaceholder=e.target.value;updateExportsAndPreview()};item.appendChild(funcBox);const ddLabel=document.createElement("label");ddLabel.className="small";ddLabel.textContent="Dropdown Items:";item.appendChild(ddLabel);const ddWrap=document.createElement("div");(b.dropdown||[]).forEach((d,di)=>{const ddiv=document.createElement("div");ddiv.style.border="1px solid rgba(255,255,255,.05)";ddiv.style.padding="6px";ddiv.style.borderRadius="6px";ddiv.style.marginBottom="6px";const dtop=document.createElement("div");dtop.className="top";const dname=document.createElement("input");dname.type="text";dname.value=d.name;dname.oninput=e=>{d.name=e.target.value;updateExportsAndPreview()};const dcolor=document.createElement("input");dcolor.type="color";dcolor.value=d.color||b.color||"#323232";const updateDColor=e=>{d.color=e.target.value;updateExportsAndPreview()};dcolor.addEventListener("input",updateDColor);dcolor.addEventListener("change",updateDColor);const ddel=document.createElement("button");ddel.className="small-btn";ddel.textContent="Del";ddel.onclick=()=>{b.dropdown.splice(di,1);renderAll()};dtop.appendChild(dname);dtop.appendChild(dcolor);dtop.appendChild(ddel);ddiv.appendChild(dtop);const dfuncLabel=document.createElement("label");dfuncLabel.className="small";dfuncLabel.textContent="What this dropdown does:";ddiv.appendChild(dfuncLabel);const dfuncBox=document.createElement("textarea");dfuncBox.value=d.funcPlaceholder;dfuncBox.oninput=e=>{d.funcPlaceholder=e.target.value;updateExportsAndPreview()};ddiv.appendChild(dfuncBox);ddWrap.appendChild(ddiv)});const addDrop=document.createElement("button");addDrop.className="small-btn";addDrop.textContent="+ Add Dropdown Item";addDrop.onclick=()=>{b.dropdown=b.dropdown||[];b.dropdown.push({name:"Option",color:b.color,funcPlaceholder:'print(\"Hello Hux\")'});renderAll()};ddWrap.appendChild(addDrop);item.appendChild(ddWrap);list.appendChild(item)})}
+function renderPreview(){const prev=el("previewArea");prev.innerHTML="";state.buttons.forEach(b=>{const div=document.createElement("div");div.className="button";div.style.background=b.color;div.textContent=b.name;prev.appendChild(div);if(b.dropdown&&b.dropdown.length>0){b.dropdown.forEach(d=>{const sub=document.createElement("div");sub.className="button";sub.style.background=d.color;sub.textContent="↳ "+d.name;sub.style.marginLeft="12px";prev.appendChild(sub)})}})}
+function renderExports(){el("jsonOut").textContent=JSON.stringify(state,null,2);const lines=[];lines.push("_G.buttonswhattheydo = {");state.buttons.forEach(b=>{lines.push("    {");lines.push(`        name = \"${escapeLua(b.name)}\",`);lines.push(`        color = ${colorToLua(b.color)},`);if(b.dropdown&&b.dropdown.length>0){lines.push("        dropdown = {");b.dropdown.forEach(d=>{lines.push("            {");lines.push(`                name = \"${escapeLua(d.name)}\",`);lines.push(`                color = ${colorToLua(d.color)},`);lines.push(`                func = function() ${d.funcPlaceholder||'print(\"Hello Hux\")'} end,`);lines.push("            },")});lines.push("        },")}else{lines.push(`        func = function() ${b.funcPlaceholder||'print(\"Hello Hux\")'} end,`)}lines.push("    },")});lines.push("}");lines.push("_G.buttons = #_G.buttonswhattheydo");el("luaOut").textContent=lines.join("\n")}
+function renderAll(){renderList();renderPreview();renderExports()}
+el("addButton").onclick=()=>{state.buttons.push({name:"New Button",color:"#323232",funcPlaceholder:'print(\"Hello Hux\")',dropdown:[]});renderAll()}
+el("loadSample").onclick=()=>{state={projectName:"HuxSample",buttons:[{name:"Say Hi",color:"#4477ff",funcPlaceholder:'print(\"Hello Hux\")',dropdown:[{name:"Extra 1",color:"#4477ff",funcPlaceholder:'print(\"Extra 1\")'},{name:"Extra 2",color:"#4477ff",funcPlaceholder:'print(\"Extra 2\")'}]},{name:"Explode",color:"#ff4444",funcPlaceholder:'game.Players.LocalPlayer.Character:BreakJoints()',dropdown:[]}]};renderAll()}
+el("copyJson").onclick=()=>navigator.clipboard.writeText(el("jsonOut").textContent)
+el("copyLua").onclick=()=>navigator.clipboard.writeText(el("luaOut").textContent)
+renderAll()
+</script>
+
+
+
+            <script>// Write JavaScript here</script>
+        
+    
+</body>
