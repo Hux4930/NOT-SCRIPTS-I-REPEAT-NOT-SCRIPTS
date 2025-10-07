@@ -1,0 +1,170 @@
+--// Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRoot = character:WaitForChild("HumanoidRootPart")
+
+--// Variables
+local remote = ReplicatedStorage:WaitForChild("Interaction"):WaitForChild("ClientIsDragging")
+local grabbedItem = nil
+local args = nil
+
+-- Orb parameters
+local orbRadius = 5
+local orbSpeed = 2
+local fireInterval = 0.1
+
+--// GUI Setup
+local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+screenGui.Name = "OrbControlGui"
+screenGui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", screenGui)
+frame.Size = UDim2.new(0, 220, 0, 187)
+frame.Position = UDim2.new(0.05, 0, 0.3, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.BackgroundTransparency = 0.2
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+
+local title = Instance.new("TextLabel", frame)
+title.Text = "Orb Controller"
+title.Size = UDim2.new(1, 0, 0, 25)
+title.BackgroundTransparency = 1
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+
+local function makeSlider(labelText, defaultValue, posY, callback)
+	local label = Instance.new("TextLabel", frame)
+	label.Text = labelText .. ": " .. defaultValue
+	label.Position = UDim2.new(0, 10, 0, posY)
+	label.Size = UDim2.new(0, 200, 0, 20)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.Font = Enum.Font.Gotham
+	label.TextScaled = true
+
+	local slider = Instance.new("TextBox", frame)
+	slider.Position = UDim2.new(0, 10, 0, posY + 25)
+	slider.Size = UDim2.new(0, 200, 0, 20)
+	slider.Text = tostring(defaultValue)
+	slider.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	slider.TextColor3 = Color3.fromRGB(255, 255, 255)
+	slider.Font = Enum.Font.Gotham
+	slider.TextScaled = true
+
+	slider.FocusLost:Connect(function()
+		local val = tonumber(slider.Text)
+		if val then
+			callback(val)
+			label.Text = labelText .. ": " .. val
+		else
+			slider.Text = tostring(defaultValue)
+		end
+	end)
+end
+
+makeSlider("Orb Radius", orbRadius, 30, function(v) orbRadius = v end)
+makeSlider("Orb Speed", orbSpeed, 80, function(v) orbSpeed = v end)
+makeSlider("Fire Rate", fireInterval, 130, function(v) fireInterval = v end)
+
+--// Orb creation
+local orb = Instance.new("Part")
+orb.Shape = Enum.PartType.Ball
+orb.Size = Vector3.new(2, 2, 2)
+orb.Anchored = true
+orb.CanCollide = false
+orb.Material = Enum.Material.Neon
+orb.BrickColor = BrickColor.new("Bright violet")
+orb.Parent = workspace
+
+--// Path builder for args
+local function buildArgs(item)
+	local pathParts = {}
+	local current = item
+	while current ~= workspace and current.Parent do
+		table.insert(pathParts, 1, current.Name)
+		current = current.Parent
+	end
+	local obj = workspace
+	for _, name in ipairs(pathParts) do
+		obj = obj:WaitForChild(name)
+	end
+	return { obj }
+end
+
+--// Mouse click to grab an item
+mouse.Button1Down:Connect(function()
+	local target = mouse.Target
+
+	while target and not target:IsA("Model") do
+		target = target.Parent
+	end
+
+	if target and target:IsA("Model") then
+		if not (target:IsDescendantOf(workspace:WaitForChild("LogModels")) or target:IsDescendantOf(workspace:WaitForChild("PlayerModels"))) then
+			return
+		end
+
+		local hasMovablePart = false
+		for _, part in ipairs(target:GetDescendants()) do
+			if part:IsA("BasePart") and not part.Anchored then
+				hasMovablePart = true
+				break
+			end
+		end
+
+		if hasMovablePart then
+			grabbedItem = target
+			args = buildArgs(grabbedItem)
+			print("Grabbed item:", grabbedItem:GetFullName())
+
+			if mouse.Target then
+				orbMidpoint = mouse.Target.Position - grabbedItem:GetModelCFrame().Position
+			end
+		end
+	end
+end)
+
+--// Fire remote continuously
+task.spawn(function()
+	while true do
+		if args then
+			remote:FireServer(unpack(args))
+			print("Firing remote on:", args[1]:GetFullName())
+		end
+		task.wait(fireInterval)
+	end
+end)
+
+--// Orb motion
+local orbAngle = 0
+RunService.RenderStepped:Connect(function(delta)
+	orbAngle += orbSpeed * delta
+	local offset = Vector3.new(math.cos(orbAngle) * orbRadius, 2, math.sin(orbAngle) * orbRadius)
+	orb.CFrame = humanoidRoot.CFrame + offset
+
+	if grabbedItem then
+		local mainPart = grabbedItem.PrimaryPart
+		if not mainPart then
+			for _, part in ipairs(grabbedItem:GetDescendants()) do
+				if part:IsA("BasePart") and not part.Anchored then
+					mainPart = part
+					break
+				end
+			end
+		end
+
+		if mainPart then
+			mainPart.Velocity = Vector3.zero
+			mainPart.RotVelocity = Vector3.zero
+			mainPart.CFrame = orb.CFrame
+		end
+	end
+end)
