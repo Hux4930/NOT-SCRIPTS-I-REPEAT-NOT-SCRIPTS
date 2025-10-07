@@ -17,6 +17,7 @@ local args = nil
 local orbRadius = 5
 local orbSpeed = 2
 local fireInterval = 0.1
+local orbEnabled = true -- toggle state
 
 --// GUI Setup
 local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
@@ -24,7 +25,7 @@ screenGui.Name = "OrbControlGui"
 screenGui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", screenGui)
-frame.Size = UDim2.new(0, 220, 0, 187)
+frame.Size = UDim2.new(0, 220, 0, 230)
 frame.Position = UDim2.new(0.05, 0, 0.3, 0)
 frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 frame.BackgroundTransparency = 0.2
@@ -40,6 +41,29 @@ title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.GothamBold
 title.TextScaled = true
 
+--// Toggle Button
+local toggleButton = Instance.new("TextButton", frame)
+toggleButton.Size = UDim2.new(0, 200, 0, 30)
+toggleButton.Position = UDim2.new(0, 10, 0, 180)
+toggleButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+toggleButton.Text = "Toggle Orb (ON)"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextScaled = true
+toggleButton.AutoButtonColor = false
+
+toggleButton.MouseButton1Click:Connect(function()
+	orbEnabled = not orbEnabled
+	if orbEnabled then
+		toggleButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+		toggleButton.Text = "Toggle Orb (ON)"
+	else
+		toggleButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+		toggleButton.Text = "Toggle Orb (OFF)"
+	end
+end)
+
+--// Slider setup
 local function makeSlider(labelText, defaultValue, posY, callback)
 	local label = Instance.new("TextLabel", frame)
 	label.Text = labelText .. ": " .. defaultValue
@@ -84,7 +108,7 @@ orb.Material = Enum.Material.Neon
 orb.BrickColor = BrickColor.new("Bright violet")
 orb.Parent = workspace
 
---// Path builder for args
+--// Path builder
 local function buildArgs(item)
 	local pathParts = {}
 	local current = item
@@ -101,8 +125,9 @@ end
 
 --// Mouse click to grab an item
 mouse.Button1Down:Connect(function()
-	local target = mouse.Target
+	if not orbEnabled then return end
 
+	local target = mouse.Target
 	while target and not target:IsA("Model") do
 		target = target.Parent
 	end
@@ -135,9 +160,8 @@ end)
 --// Fire remote continuously
 task.spawn(function()
 	while true do
-		if args then
+		if orbEnabled and args then
 			remote:FireServer(unpack(args))
-			print("Firing remote on:", args[1]:GetFullName())
 		end
 		task.wait(fireInterval)
 	end
@@ -146,6 +170,8 @@ end)
 --// Orb motion
 local orbAngle = 0
 RunService.RenderStepped:Connect(function(delta)
+	if not orbEnabled then return end
+
 	orbAngle += orbSpeed * delta
 	local offset = Vector3.new(math.cos(orbAngle) * orbRadius, 2, math.sin(orbAngle) * orbRadius)
 	orb.CFrame = humanoidRoot.CFrame + offset
