@@ -1,0 +1,224 @@
+local WIDTH = 300
+local buttonHeight = 30
+local buttonSpacing = 5
+local titleHeight = 30
+local padding = 20
+local margin = 20
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HuxsScriptGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local backdrop = Instance.new("Frame")
+backdrop.Name = "Backdrop"
+backdrop.Size = UDim2.new(0, WIDTH, 0, 100)
+backdrop.Position = UDim2.new(1, -WIDTH - margin, 0, margin)
+backdrop.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+backdrop.BorderSizePixel = 0
+backdrop.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, 0, 0, titleHeight)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Huxs Script"
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+title.Parent = backdrop
+
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 28, 0, 22)
+closeButton.Position = UDim2.new(0.87, 6, 0, (titleHeight - 22) / 2)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.BorderSizePixel = 0
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 18
+closeButton.AutoButtonColor = true
+closeButton.Parent = backdrop
+
+closeButton.MouseButton1Click:Connect(function()
+	screenGui:Destroy()
+end)
+
+local buttonsFrame = Instance.new("Frame")
+buttonsFrame.Name = "ButtonsFrame"
+buttonsFrame.Size = UDim2.new(1, -20, 0, 0)
+buttonsFrame.Position = UDim2.new(0, 10, 0, titleHeight + 5)
+buttonsFrame.BackgroundTransparency = 1
+buttonsFrame.Parent = backdrop
+
+-- function to rebuild layout
+local function rebuildLayout()
+	local curY = 0
+	for _, child in ipairs(buttonsFrame:GetChildren()) do
+		if child:IsA("GuiObject") and child.Visible then
+			child.Position = UDim2.new(0, 0, 0, curY)
+			curY = curY + child.AbsoluteSize.Y + buttonSpacing
+		end
+	end
+	buttonsFrame.Size = UDim2.new(1, -20, 0, curY)
+	backdrop.Size = UDim2.new(0, WIDTH, 0, titleHeight + curY + padding)
+end
+
+-- function to create buttons
+local function createButtons()
+	for _, obj in ipairs(buttonsFrame:GetChildren()) do
+		if obj:IsA("GuiObject") then
+			obj:Destroy()
+		end
+	end
+
+	local yPos = 0
+
+	for i, data in ipairs(_G.buttonswhattheydo) do
+		local btnColor = data.color or Color3.fromRGB(50, 50, 50)
+
+		local btn = Instance.new("TextButton")
+		btn.Name = "Button" .. i
+		btn.Size = UDim2.new(1, 0, 0, buttonHeight)
+		btn.Position = UDim2.new(0, 0, 0, yPos)
+		btn.BackgroundColor3 = btnColor
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.Font = Enum.Font.Gotham
+		btn.TextSize = 18
+		btn.Text = data.name or ("Button " .. i)
+		btn.Parent = buttonsFrame
+
+		yPos = yPos + buttonHeight + buttonSpacing
+
+		if data.dropdown then
+			local expanded = false
+			local dropdownButtons = {}
+
+			for j, sub in ipairs(data.dropdown) do
+				local subBtnColor = sub.color or btnColor
+
+				local subBtn = Instance.new("TextButton")
+				subBtn.Name = data.name .. "_Sub" .. j
+				subBtn.Size = UDim2.new(1, 0, 0, buttonHeight)
+				subBtn.Position = UDim2.new(0, 40, 0, yPos)
+				subBtn.BackgroundColor3 = subBtnColor
+				subBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+				subBtn.Font = Enum.Font.Gotham
+				subBtn.TextSize = 18
+				subBtn.Text = "" .. sub.name
+				subBtn.Visible = false
+				subBtn.Parent = buttonsFrame
+
+				subBtn.MouseButton1Click:Connect(function()
+					if sub.func then
+						sub.func()
+					end
+				end)
+
+				table.insert(dropdownButtons, subBtn)
+				yPos = yPos + buttonHeight + buttonSpacing
+			end
+
+			btn.MouseButton1Click:Connect(function()
+				expanded = not expanded
+				for _, b in ipairs(dropdownButtons) do
+					b.Visible = expanded
+				end
+				rebuildLayout()
+			end)
+		else
+			btn.MouseButton1Click:Connect(function()
+				if data.func then
+					data.func()
+				else
+					warn("No function assigned for button " .. i)
+				end
+			end)
+		end
+	end
+
+	rebuildLayout()
+end
+
+createButtons()
+
+-- drag handling
+local dragging = false
+local dragOffset = Vector2.new(0,0)
+local viewportSize = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+
+local function clampPosition(pos)
+	local x = math.clamp(pos.X, 0, viewportSize.X - backdrop.AbsoluteSize.X)
+	local y = math.clamp(pos.Y, 0, viewportSize.Y - backdrop.AbsoluteSize.Y)
+	return Vector2.new(x, y)
+end
+
+local function beginDrag()
+	local mouseLoc = UIS:GetMouseLocation()
+	dragOffset = mouseLoc - backdrop.AbsolutePosition
+	dragging = true
+end
+
+local function endDrag()
+	dragging = false
+end
+
+title.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		beginDrag()
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				endDrag()
+			end
+		end)
+	end
+end)
+
+UIS.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		endDrag()
+	end
+end)
+
+if workspace.CurrentCamera then
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+		viewportSize = workspace.CurrentCamera.ViewportSize
+	end)
+end
+
+local conn
+conn = RunService.RenderStepped:Connect(function()
+	if dragging then
+		local mouseLoc = UIS:GetMouseLocation()
+		local newTopLeft = mouseLoc - dragOffset
+		local clamped = clampPosition(newTopLeft)
+		backdrop.Position = UDim2.new(0, clamped.X, 0, clamped.Y)
+	end
+end)
+
+screenGui.AncestryChanged:Connect(function(_, parent)
+	if not parent then
+		if conn and conn.Connected then
+			conn:Disconnect()
+		end
+	end
+end)
+
+-- GUI toggle key
+local guiVisible = true
+local toggleKey = Enum.KeyCode.LeftAlt
+UIS.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == toggleKey then
+		guiVisible = not guiVisible
+		screenGui.Enabled = guiVisible
+	end
+end)
