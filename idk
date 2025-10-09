@@ -1,0 +1,34 @@
+local Workspace = game:GetService("Workspace")
+local tracedCandies = {}
+
+local function traceCandy(model)
+    if tracedCandies[model] then return end -- already traced
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = model
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.Parent = Workspace
+
+    tracedCandies[model] = highlight
+end
+
+local function updateTraces()
+    for _, model in pairs(Workspace.PlayerModels:GetChildren()) do
+        if model.Name == "Candy" and model:FindFirstChild("Settings") then
+            local idValue = model.Settings:FindFirstChild("ID")
+            if idValue and idValue.Value == 104 then
+                traceCandy(model)
+            end
+        end
+    end
+end
+
+-- Initial update
+updateTraces()
+
+-- Update periodically every 0.5s
+while true do
+    updateTraces()
+    task.wait(0.5)
+end
