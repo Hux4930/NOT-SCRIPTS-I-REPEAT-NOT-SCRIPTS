@@ -15,7 +15,7 @@ end
 
 local function updateTraces()
     for _, model in pairs(Workspace.PlayerModels:GetChildren()) do
-        if model.Name == "Candy" and model:FindFirstChild("Settings") then
+        if (model.Name == "Candy" or model.Name == "Model") and model:FindFirstChild("Settings") then
             local idValue = model.Settings:FindFirstChild("ID")
             if idValue and idValue.Value == 104 then
                 traceCandy(model)
