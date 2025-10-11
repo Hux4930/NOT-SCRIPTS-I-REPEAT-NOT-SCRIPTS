@@ -3,16 +3,14 @@ local UIS = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-if playerGui:FindFirstChild("HuxsScriptGui") then
-	playerGui.HuxsScriptGui:Destroy()
-end
+
 
 local gui = Instance.new("ScreenGui", playerGui)
 gui.Name = "HuxsScriptGui"
 gui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 300, 0, 100)
+frame.Size = UDim2.new(0, 300, 0, 120)
 frame.Position = UDim2.new(0.5, -150, 0.4, 0)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
