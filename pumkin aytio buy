@@ -1,0 +1,234 @@
+--// REMOVE "Slate" FUNCTIONALITY
+local function removeSlate(obj)
+    if obj.Name == "Slate" then
+        obj:Destroy()
+    end
+end
+
+-- Remove existing Slates
+for _, obj in pairs(game:GetDescendants()) do
+    removeSlate(obj)
+end
+
+-- Connect to future added objects
+game.DescendantAdded:Connect(removeSlate)
+
+--// SERVICES
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
+local workspaceStores = Workspace:WaitForChild("Stores")
+
+--// GUI SETUP
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "HuxsScriptGui"
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 300, 0, 175)
+Frame.Position = UDim2.new(0.5, -150, 0.5, -150)
+Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Frame.Parent = ScreenGui
+Frame.Draggable = true
+Frame.Active = true
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundTransparency = 1
+Title.Text = "Huxs Script"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 20
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Parent = Frame
+
+--// BUTTON CREATION FUNCTION
+local function createButton(name, yPos, func)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 280, 0, 30)
+    btn.Position = UDim2.new(0, 10, 0, yPos)
+    btn.Text = name
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 16
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Parent = Frame
+    btn.MouseButton1Click:Connect(func)
+    return btn
+end
+
+--// CLEANUP & SETUP BUTTON
+createButton("Run Cleanup & Setup", 50, function()
+    local namesToRemove = {"Wheel", "Wooden Barrel", "Shelf"}
+    for _, obj in ipairs(game:GetDescendants()) do
+        for _, name in ipairs(namesToRemove) do
+            if string.find(string.lower(obj.Name), string.lower(name)) then
+                obj:Destroy()
+                break
+            end
+        end
+    end
+
+    -- Non-collidable objects
+    local function makeNonCollidable(model)
+        for _, part in ipairs(model:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+
+    local shackParts = workspace.Stores.ShackShop.Parts
+    local ceilingLight = shackParts.CeilingLight
+    local bob = workspace.Stores.ShackShop.Bob
+    local floor = workspace.Stores.ShackShop.Floor
+
+    makeNonCollidable(shackParts)
+    makeNonCollidable(ceilingLight)
+    makeNonCollidable(bob)
+
+    if floor:IsA("BasePart") then
+        floor.Size = Vector3.new(330.4, 3, 281)
+    end
+
+    -- Destroy Slates near Counter
+    local counter = workspace.Stores.ShackShop:FindFirstChild("Counter")
+    if counter then
+        local counterPos = (counter:IsA("BasePart") and counter.Position) or (counter.PrimaryPart and counter.PrimaryPart.Position)
+        for _, obj in ipairs(counter:GetDescendants()) do
+            local objPos = (obj:IsA("BasePart") and obj.Position) or (obj.PrimaryPart and obj.PrimaryPart.Position)
+            if objPos and string.find(string.lower(obj.Name), "slate") then
+                if (objPos - counterPos).Magnitude <= 200 then
+                    obj:Destroy()
+                end
+            end
+        end
+    end
+end)
+
+--// TOGGLE BUTTONS
+local running, runningPumpkin = false, false
+createButton("Toggle Auto Buy", 90, function()
+    running = not running
+    ToggleButton.Text = running and "Auto Buy: ON" or "Auto Buy: OFF"
+end)
+
+createButton("Toggle Auto Buy PumpkinMelon", 130, function()
+    runningPumpkin = not runningPumpkin
+    ToggleButton2.Text = runningPumpkin and "PumpkinMelon: ON" or "PumpkinMelon: OFF"
+end)
+
+--// HELPER FUNCTIONS
+local function getPlayerPlotOrigin()
+    for _, property in pairs(Workspace:WaitForChild("Properties"):GetChildren()) do
+        local owner = property:FindFirstChild("Owner")
+        if owner and owner.Value == player then
+            local origin = property:FindFirstChild("OriginSquare")
+            if origin then return origin end
+        end
+    end
+end
+
+local function findBoxItems(targetName)
+    local found = {}
+    for _, store in pairs(workspaceStores:GetChildren()) do
+        for _, item in pairs(store:GetChildren()) do
+            if item:FindFirstChild("BoxItemName") and item.BoxItemName.Value == targetName then
+                table.insert(found, item)
+            end
+        end
+    end
+    return found
+end
+
+local function freezeCarSeat()
+    local character = player.Character or player.CharacterAdded:Wait()
+    local seat = character:FindFirstChildWhichIsA("Seat") or character:FindFirstChildWhichIsA("VehicleSeat")
+    if seat and seat.Parent:IsA("Model") and seat.Parent.PrimaryPart then
+        local car = seat.Parent
+        car:SetPrimaryPartCFrame(car.PrimaryPart.CFrame)
+        for _, part in pairs(car:GetDescendants()) do
+            if part:IsA("BasePart") then part.Anchored = true end
+            if part:IsA("VehicleSeat") then part.Disabled = true end
+        end
+    end
+end
+
+--// AUTO BUY LOOP
+local finalTPPart = getPlayerPlotOrigin()
+local finalTPCFrame = finalTPPart and finalTPPart.CFrame or CFrame.new(-273, 34.2, 222)
+
+spawn(function()
+    while true do
+        if running then
+            freezeCarSeat()
+            local carPosition = CFrame.new(318, 3.5, 60.39, 0.0144, 0, 0.9999, 0, 1, 0, -0.9999, 0, 0.0144)
+            local character = player.Character or player.CharacterAdded:Wait()
+            character.HumanoidRootPart.CFrame = carPosition
+
+            local car = Workspace:FindFirstChild("Car")
+            if car then car:SetPrimaryPartCFrame(carPosition); freezeCarSeat() end
+
+            task.wait(0.2)
+            local items = findBoxItems("BagOfCandy7")
+            local itemCFrame = CFrame.new(268, 2, 67.4)
+            for _, item in pairs(items) do
+                if item:IsA("Model") and item.PrimaryPart then
+                    item:SetPrimaryPartCFrame(itemCFrame)
+                end
+            end
+
+            task.wait(0.2)
+            local args = {{ID = 10, Character = workspaceStores.WoodRUs.Thom, Name = "Thom", Dialog = workspaceStores.WoodRUs.Thom.Dialog}, "ConfirmPurchase"}
+            ReplicatedStorage.NPCDialog.PlayerChatted:InvokeServer(unpack(args))
+
+            finalTPPart = getPlayerPlotOrigin()
+            finalTPCFrame = finalTPPart and finalTPPart.CFrame or finalTPCFrame
+            local finalItemCFrame = finalTPCFrame + Vector3.new(math.random(-9,9), 15, math.random(-9,9))
+            for _, item in pairs(items) do
+                if item:IsA("Model") and item.PrimaryPart then item:SetPrimaryPartCFrame(finalItemCFrame) end
+            end
+
+            repeat task.wait(0.2) until #findBoxItems("BagOfCandy7") > 1
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+--// AUTO BUY LOOP (PumpkinMelon)
+spawn(function()
+    while true do
+        if runningPumpkin then
+            freezeCarSeat()
+            local carPosition = CFrame.new(262.12, 8.83, -2556.7, -0.269, 0, 0.963, 0, 1, 0, -0.963, 0, -0.269)
+            local character = player.Character or player.CharacterAdded:Wait()
+            character.HumanoidRootPart.CFrame = carPosition
+
+            local car = Workspace:FindFirstChild("Car")
+            if car then car:SetPrimaryPartCFrame(carPosition); freezeCarSeat() end
+
+            task.wait(0.2)
+            local items = findBoxItems("PumpkinMelon")
+            local pumpkinPos = CFrame.new(260.39, 9.2, -2551.43, 0.9659, 0, 0.2588, 0, 1, 0, -0.2588, 0, 0.9659)
+            for _, item in pairs(items) do
+                if item:IsA("Model") and item.PrimaryPart then item:SetPrimaryPartCFrame(pumpkinPos) end
+            end
+
+            task.wait(0.2)
+            local args = {{ID = 13, Character = workspaceStores.ShackShop.Bob, Name = "Bob", Dialog = workspaceStores.ShackShop.Bob.Dialog}, "ConfirmPurchase"}
+            ReplicatedStorage.NPCDialog.PlayerChatted:InvokeServer(unpack(args))
+
+            finalTPPart = getPlayerPlotOrigin()
+            finalTPCFrame = finalTPPart and finalTPPart.CFrame or finalTPCFrame
+            local finalItemCFrame = finalTPCFrame + Vector3.new(math.random(-90,90), 15, math.random(-90,90))
+            for _, item in pairs(items) do
+                if item:IsA("Model") and item.PrimaryPart then item:SetPrimaryPartCFrame(finalItemCFrame) end
+            end
+
+            repeat task.wait(0.2) until #findBoxItems("PumpkinMelon") > 1
+        else
+            task.wait(0.5)
+        end
+    end
+end)
