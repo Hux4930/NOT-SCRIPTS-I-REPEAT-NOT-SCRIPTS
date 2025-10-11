@@ -3,14 +3,17 @@ local UIS = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+if playerGui:FindFirstChild("HuxsScriptGui") then
+	playerGui.HuxsScriptGui:Destroy()
+end
 
 local gui = Instance.new("ScreenGui", playerGui)
 gui.Name = "HuxsScriptGui"
 gui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 300, 0, 120)
-frame.Position = UDim2.new(0.5, -100, 0.4, 0)
+frame.Size = UDim2.new(0, 300, 0, 100)
+frame.Position = UDim2.new(0.5, -150, 0.4, 0)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.Active = true
@@ -43,7 +46,7 @@ anchorBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
 anchorBtn.TextColor3 = Color3.fromRGB(255,255,255)
 anchorBtn.Font = Enum.Font.Gotham
 anchorBtn.TextSize = 14
-anchorBtn.Text = "Anchor My Models"
+anchorBtn.Text = "Anchor All PlayerModels"
 
 local unanchorBtn = Instance.new("TextButton", frame)
 unanchorBtn.Size = UDim2.new(1, -40, 0, 30)
@@ -52,22 +55,14 @@ unanchorBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
 unanchorBtn.TextColor3 = Color3.fromRGB(255,255,255)
 unanchorBtn.Font = Enum.Font.Gotham
 unanchorBtn.TextSize = 14
-unanchorBtn.Text = "Unanchor My Models"
+unanchorBtn.Text = "Unanchor All PlayerModels"
 
--- helper to check ownership
-local function isOwnedByPlayer(model)
-	-- Fast ownership check: attribute, tag, or name
-	if model:GetAttribute("Owner") == player.Name then return true end
-	if string.find(model.Name, player.Name) then return true end
-	if model:FindFirstChild("Owner") and model.Owner:IsA("ObjectValue") and model.Owner.Value == player then return true end
-	return false
-end
-
--- optimized anchor function
 local function anchorAll(state)
-	for _, v in ipairs(workspace:GetChildren()) do
-		if v:IsA("Model") and isOwnedByPlayer(v) then
-			for _, p in ipairs(v:GetDescendants()) do
+	local playerModels = workspace:FindFirstChild("PlayerModels")
+	if not playerModels then return end
+	for _, model in ipairs(playerModels:GetChildren()) do
+		if model:IsA("Model") then
+			for _, p in ipairs(model:GetDescendants()) do
 				if p:IsA("BasePart") then
 					p.Anchored = state
 				end
