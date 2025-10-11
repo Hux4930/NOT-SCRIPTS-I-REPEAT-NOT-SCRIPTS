@@ -1,0 +1,91 @@
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+
+local gui = Instance.new("ScreenGui", playerGui)
+gui.Name = "HuxsScriptGui"
+gui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 300, 0, 120)
+frame.Position = UDim2.new(0.5, -100, 0.4, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, -30, 0, 30)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Huxs Script"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+local close = Instance.new("TextButton", frame)
+close.Size = UDim2.new(0, 20, 0, 20)
+close.Position = UDim2.new(1, -25, 0, 5)
+close.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+close.Text = "X"
+close.TextColor3 = Color3.fromRGB(255,255,255)
+close.Font = Enum.Font.Gotham
+close.TextSize = 14
+close.MouseButton1Click:Connect(function() gui:Destroy() end)
+
+local anchorBtn = Instance.new("TextButton", frame)
+anchorBtn.Size = UDim2.new(1, -40, 0, 30)
+anchorBtn.Position = UDim2.new(0, 20, 0, 40)
+anchorBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+anchorBtn.TextColor3 = Color3.fromRGB(255,255,255)
+anchorBtn.Font = Enum.Font.Gotham
+anchorBtn.TextSize = 14
+anchorBtn.Text = "Anchor My Models"
+
+local unanchorBtn = Instance.new("TextButton", frame)
+unanchorBtn.Size = UDim2.new(1, -40, 0, 30)
+unanchorBtn.Position = UDim2.new(0, 20, 0, 75)
+unanchorBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+unanchorBtn.TextColor3 = Color3.fromRGB(255,255,255)
+unanchorBtn.Font = Enum.Font.Gotham
+unanchorBtn.TextSize = 14
+unanchorBtn.Text = "Unanchor My Models"
+
+-- helper to check ownership
+local function isOwnedByPlayer(model)
+	-- Fast ownership check: attribute, tag, or name
+	if model:GetAttribute("Owner") == player.Name then return true end
+	if string.find(model.Name, player.Name) then return true end
+	if model:FindFirstChild("Owner") and model.Owner:IsA("ObjectValue") and model.Owner.Value == player then return true end
+	return false
+end
+
+-- optimized anchor function
+local function anchorAll(state)
+	for _, v in ipairs(workspace:GetChildren()) do
+		if v:IsA("Model") and isOwnedByPlayer(v) then
+			for _, p in ipairs(v:GetDescendants()) do
+				if p:IsA("BasePart") then
+					p.Anchored = state
+				end
+			end
+		end
+	end
+end
+
+anchorBtn.MouseButton1Click:Connect(function()
+	anchorAll(true)
+end)
+
+unanchorBtn.MouseButton1Click:Connect(function()
+	anchorAll(false)
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+	if not gpe and input.KeyCode == Enum.KeyCode.LeftAlt then
+		gui.Enabled = not gui.Enabled
+	end
+end)
