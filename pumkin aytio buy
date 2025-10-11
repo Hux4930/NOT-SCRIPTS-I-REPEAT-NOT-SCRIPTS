@@ -1,3 +1,15 @@
+--// PING DEPENDENT WAIT
+local Stats = game:GetService("Stats")
+local function getPingWait()
+    local ping = tonumber(string.match(Stats.Network.ServerStatsItem["Data Ping"]:GetValueString(), "%d+")) or 100
+    return ping / 470 -- example: 100 ping = 0.15, 200 ping = 0.3, 300 ping = 0.45
+end
+
+-- Custom wait that scales with ping
+local function pingWait(mult)
+    task.wait(getPingWait() * (mult or 1))
+end
+
 --// REMOVE "Slate" FUNCTIONALITY
 local function removeSlate(obj)
     if obj.Name == "Slate" then
@@ -69,7 +81,6 @@ createButton("Run Cleanup & Setup", 50, function()
         end
     end
 
-    -- Non-collidable objects
     local function makeNonCollidable(model)
         for _, part in ipairs(model:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -91,7 +102,6 @@ createButton("Run Cleanup & Setup", 50, function()
         floor.Size = Vector3.new(330.4, 3, 281)
     end
 
-    -- Destroy Slates near Counter
     local counter = workspace.Stores.ShackShop:FindFirstChild("Counter")
     if counter then
         local counterPos = (counter:IsA("BasePart") and counter.Position) or (counter.PrimaryPart and counter.PrimaryPart.Position)
@@ -108,12 +118,12 @@ end)
 
 --// TOGGLE BUTTONS
 local running, runningPumpkin = false, false
-createButton("Toggle Auto Buy", 90, function()
+local ToggleButton = createButton("Toggle Auto Buy", 90, function()
     running = not running
     ToggleButton.Text = running and "Auto Buy: ON" or "Auto Buy: OFF"
 end)
 
-createButton("Toggle Auto Buy PumpkinMelon", 130, function()
+local ToggleButton2 = createButton("Toggle Auto Buy PumpkinMelon", 130, function()
     runningPumpkin = not runningPumpkin
     ToggleButton2.Text = runningPumpkin and "PumpkinMelon: ON" or "PumpkinMelon: OFF"
 end)
@@ -162,14 +172,14 @@ spawn(function()
     while true do
         if running then
             freezeCarSeat()
-            local carPosition = CFrame.new(318, 3.5, 60.39, 0.0144, 0, 0.9999, 0, 1, 0, -0.9999, 0, 0.0144)
+            local carPosition = CFrame.new(318, 4.63, 60.39, 0.0144, 0, 0.9999, 0, 1, 0, -0.9999, 0, 0.0144)
             local character = player.Character or player.CharacterAdded:Wait()
             character.HumanoidRootPart.CFrame = carPosition
 
             local car = Workspace:FindFirstChild("Car")
             if car then car:SetPrimaryPartCFrame(carPosition); freezeCarSeat() end
 
-            task.wait(0.2)
+            pingWait(1)
             local items = findBoxItems("BagOfCandy7")
             local itemCFrame = CFrame.new(268, 2, 67.4)
             for _, item in pairs(items) do
@@ -178,20 +188,20 @@ spawn(function()
                 end
             end
 
-            task.wait(0.2)
+            pingWait(1)
             local args = {{ID = 10, Character = workspaceStores.WoodRUs.Thom, Name = "Thom", Dialog = workspaceStores.WoodRUs.Thom.Dialog}, "ConfirmPurchase"}
             ReplicatedStorage.NPCDialog.PlayerChatted:InvokeServer(unpack(args))
 
             finalTPPart = getPlayerPlotOrigin()
             finalTPCFrame = finalTPPart and finalTPPart.CFrame or finalTPCFrame
-            local finalItemCFrame = finalTPCFrame + Vector3.new(math.random(-9,9), 15, math.random(-9,9))
+            local finalItemCFrame = finalTPCFrame + Vector3.new(-40, 15, -40)
             for _, item in pairs(items) do
                 if item:IsA("Model") and item.PrimaryPart then item:SetPrimaryPartCFrame(finalItemCFrame) end
             end
 
-            repeat task.wait(0.2) until #findBoxItems("BagOfCandy7") > 1
+            repeat pingWait(1) until #findBoxItems("BagOfCandy7") > 1
         else
-            task.wait(0.5)
+            pingWait(3)
         end
     end
 end)
@@ -208,27 +218,27 @@ spawn(function()
             local car = Workspace:FindFirstChild("Car")
             if car then car:SetPrimaryPartCFrame(carPosition); freezeCarSeat() end
 
-            task.wait(0.2)
+            pingWait(1)
             local items = findBoxItems("PumpkinMelon")
             local pumpkinPos = CFrame.new(260.39, 9.2, -2551.43, 0.9659, 0, 0.2588, 0, 1, 0, -0.2588, 0, 0.9659)
             for _, item in pairs(items) do
                 if item:IsA("Model") and item.PrimaryPart then item:SetPrimaryPartCFrame(pumpkinPos) end
             end
 
-            task.wait(0.2)
+            pingWait(1)
             local args = {{ID = 13, Character = workspaceStores.ShackShop.Bob, Name = "Bob", Dialog = workspaceStores.ShackShop.Bob.Dialog}, "ConfirmPurchase"}
             ReplicatedStorage.NPCDialog.PlayerChatted:InvokeServer(unpack(args))
 
             finalTPPart = getPlayerPlotOrigin()
             finalTPCFrame = finalTPPart and finalTPPart.CFrame or finalTPCFrame
-            local finalItemCFrame = finalTPCFrame + Vector3.new(math.random(-90,90), 15, math.random(-90,90))
+            local finalItemCFrame = finalTPCFrame + Vector3.new(40, 15, 40)
             for _, item in pairs(items) do
                 if item:IsA("Model") and item.PrimaryPart then item:SetPrimaryPartCFrame(finalItemCFrame) end
             end
 
-            repeat task.wait(0.2) until #findBoxItems("PumpkinMelon") > 1
+            repeat pingWait(1) until #findBoxItems("PumpkinMelon") > 1
         else
-            task.wait(0.5)
+            pingWait(3)
         end
     end
 end)
