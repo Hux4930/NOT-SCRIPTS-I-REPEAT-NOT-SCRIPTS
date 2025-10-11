@@ -10,7 +10,7 @@ gui.Name = "HuxsScriptGui"
 gui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 300, 0, 120)
+frame.Size = UDim2.new(0, 300, 0, 100)
 frame.Position = UDim2.new(0.5, -150, 0.4, 0)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
@@ -44,7 +44,7 @@ anchorBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
 anchorBtn.TextColor3 = Color3.fromRGB(255,255,255)
 anchorBtn.Font = Enum.Font.Gotham
 anchorBtn.TextSize = 14
-anchorBtn.Text = "Anchor All PlayerModels"
+anchorBtn.Text = "Anchor Saved Parts"
 
 local unanchorBtn = Instance.new("TextButton", frame)
 unanchorBtn.Size = UDim2.new(1, -40, 0, 30)
@@ -53,28 +53,41 @@ unanchorBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
 unanchorBtn.TextColor3 = Color3.fromRGB(255,255,255)
 unanchorBtn.Font = Enum.Font.Gotham
 unanchorBtn.TextSize = 14
-unanchorBtn.Text = "Unanchor All PlayerModels"
+unanchorBtn.Text = "Unanchor Saved Parts"
 
-local function anchorAll(state)
+-- list of parts that were originally unanchored
+local savedParts = {}
+
+-- collect unanchored BaseParts only once
+do
 	local playerModels = workspace:FindFirstChild("PlayerModels")
-	if not playerModels then return end
-	for _, model in ipairs(playerModels:GetChildren()) do
-		if model:IsA("Model") then
-			for _, p in ipairs(model:GetDescendants()) do
-				if p:IsA("BasePart") then
-					p.Anchored = state
+	if playerModels then
+		for _, model in ipairs(playerModels:GetChildren()) do
+			if model:IsA("Model") then
+				for _, p in ipairs(model:GetDescendants()) do
+					if p:IsA("BasePart") and not p.Anchored then
+						table.insert(savedParts, p)
+					end
 				end
 			end
 		end
 	end
 end
 
+local function toggleAnchors(state)
+	for _, p in ipairs(savedParts) do
+		if p and p:IsA("BasePart") then
+			p.Anchored = state
+		end
+	end
+end
+
 anchorBtn.MouseButton1Click:Connect(function()
-	anchorAll(true)
+	toggleAnchors(true)
 end)
 
 unanchorBtn.MouseButton1Click:Connect(function()
-	anchorAll(false)
+	toggleAnchors(false)
 end)
 
 UIS.InputBegan:Connect(function(input, gpe)
