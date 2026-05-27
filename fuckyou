@@ -1,7 +1,9 @@
 repeat
 	task.wait()
 until game:IsLoaded()
-
+game:GetService("UserInputService").JumpRequest:connect(function()
+     game:GetService"Players".LocalPlayer.Character:FindFirstChildOfClass'Humanoid':ChangeState("Jumping")       
+end)
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
