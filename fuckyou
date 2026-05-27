@@ -1341,7 +1341,7 @@ task.spawn(function()
 					table.remove(pending, index)
 				else
 					local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
-					if distance <= 500 then
+					if distance <= 150 then
 						local success = placeBlockRequest(previewBlock.CFrame, previewBlock.Name)
 						if success then
 							placed = placed + 1
