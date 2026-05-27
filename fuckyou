@@ -1347,7 +1347,7 @@ local function pastePreview()
 local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
 					if distance > 50 then
 						local TweenService = game:GetService("TweenService")
-						local tween = TweenService:Create(humanoidRootPart, TweenInfo.new((distance / (30 * 16)), Enum.EasingStyle.Linear), {CFrame = CFrame.new(previewBlock.Position - (previewBlock.Position - humanoidRootPart.Position).Unit * 10)})
+						local tween = TweenService:Create(humanoidRootPart, TweenInfo.new(math.max(distance / 30, 0.1), Enum.EasingStyle.Linear), {CFrame = CFrame.new(previewBlock.Position - (previewBlock.Position - humanoidRootPart.Position).Unit * 10)})
 						tween:Play() tween.Completed:Wait()
 					end
 					if distance <= 50 then
