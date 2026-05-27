@@ -122,11 +122,6 @@ function GetSchematicaFiles()
 
 	]]
 end
-
-CreateFolder("Schematica")
-
-CreateFolder("ello")
-
 -- if _G.UJGNAIKGNAJGNJSAGNLSAGLSLKRGJLKNIGANBJIERGBJISRABIGBSJIGNBSHGNNKISGABISGBSNGJSNJGSNGLJKSNG == true then
 
 if IsPremium == false then -- true
@@ -418,8 +413,6 @@ function Remotes()
 		_G.BlockPlaceHash = ReadFile("/Hash System/BlockPlaceHash") -- 2
 
 	else
-
-		CreateFolder("Hash System")
 
 		print("Getting Hashes!")
 
@@ -10272,7 +10265,7 @@ end)
 
 local Section = Tab:CreateSection("Loader Settings")
 
-CreateFolder("AutoStart")
+--("AutoStart")
 CreateFile("/AutoStart/AutoLoadSettings", "false", true)
 
 local Button = Tab:CreateButton({
