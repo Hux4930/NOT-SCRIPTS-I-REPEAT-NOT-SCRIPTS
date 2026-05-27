@@ -715,59 +715,129 @@ local function UpdateESP()
 end
 task_spawn(function() while true do pcall(function() UpdateESP() end); task_wait(1) end end)
 
-local function StartOreAura()
+llocal function StartOreAura()
     task_spawn(function()
         while toggleStates.OreAura do
-            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
-            if not getgenv().HitAuraKey then SwizUI:Notify("Waiting", "Hit an ore manually once to bypass!"); task_wait(3); continue end
-            local pickaxe = GetEquippedTool(); if not pickaxe then task_wait(1); continue end
-            local hitCount = 0; local containers = GetFarmContainers()
-            
+            local char = lp.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+            if not hrp then
+                task_wait(1)
+                continue
+            end
+
+            if not getgenv().HitAuraKey then
+                SwizUI:Notify("Waiting", "Hit an ore manually once to bypass!")
+                task_wait(3)
+                continue
+            end
+
+            local pickaxe = GetEquippedTool()
+
+            if not pickaxe then
+                task_wait(1)
+                continue
+            end
+
+            local hitCount = 0
+            local containers = GetFarmContainers()
+
             for _, container in ipairs(containers) do
-                if not toggleStates.OreAura then break end
-                 for i, block in ipairs(container:GetChildren()) do
-                    if i % 30 == 0 then task_wait() end
-                    if not toggleStates.OreAura then break end
+                if not toggleStates.OreAura then
+                    break
+                end
+
+                local children = container:GetChildren()
+
+                for i = 1, #children do
+                    local block = children[i]
+
+                    if not toggleStates.OreAura then
+                        break
+                    end
+
                     if IsAuraOreMatch(block) then
-                        local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
+                        local hitPart =
+                            block:FindFirstChild("1") or
+                            block:FindFirstChildWhichIsA("BasePart")
+
                         if hitPart and hitPart:IsA("BasePart") then
                             local dist = (hrp.Position - hitPart.Position).Magnitude
-                            if dist <= getgenv().OreAuraRadius then
-task_spawn(function()
-    pcall(function()
-        local char2 = lp.Character
-        local hrp2 = char2 and char2:FindFirstChild("HumanoidRootPart")
-        if hrp2 then
-            local targetCFrame = CFrame.new(hitPart.Position + Vector3.new(0, 3, 0))
-            local dist2 = (hrp2.Position - targetCFrame.Position).Magnitude
-            local tweenInfo2 = TweenInfo.new(dist2 / 30, Enum.EasingStyle.Linear)
-            local moveTween = TweenService:Create(hrp2, tweenInfo2, {CFrame = targetCFrame})
-            moveTween:Play()
-            moveTween.Completed:Wait()
-        end
 
-        local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
-        if netManaged then
-            netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
-            local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
-            if blockRemote then
-                local args = { [1] = { [getgenv().HitAuraKey] = getgenv().HitAuraValue, ["part"] = hitPart, ["block"] = block, ["norm"] = hitPart.Position, ["pos"] = Vector3.new(math_random(-100, 100) / 100, math_random(0, 100) / 100, math_random(-100, 100) / 100) } }
-                blockRemote:InvokeServer(unpack(args))
-            end
-        end
-    end)
-end)
-                                hitCount = hitCount + 1; task_wait(math_random(10, 15) / 100)
+                            if dist <= getgenv().OreAuraRadius then
+                                hitCount = hitCount + 1
+
+                                task_spawn(function()
+                                    pcall(function()
+                                        local char2 = lp.Character
+                                        local hrp2 = char2 and char2:FindFirstChild("HumanoidRootPart")
+
+                                        if hrp2 then
+                                            local targetCFrame =
+                                                CFrame.new(hitPart.Position + Vector3.new(0, 3, 0))
+
+                                            local dist2 =
+                                                (hrp2.Position - targetCFrame.Position).Magnitude
+
+                                            local tweenInfo2 =
+                                                TweenInfo.new(dist2 / 30, Enum.EasingStyle.Linear)
+
+                                            local moveTween =
+                                                TweenService:Create(
+                                                    hrp2,
+                                                    tweenInfo2,
+                                                    {CFrame = targetCFrame}
+                                                )
+
+                                            moveTween:Play()
+                                            moveTween.Completed:Wait()
+                                        end
+
+                                        local netManaged =
+                                            ReplicatedStorage:FindFirstChild("rbxts_include")
+
+                                        if netManaged then
+                                            netManaged =
+                                                netManaged.node_modules
+                                                :FindFirstChild("@rbxts")
+                                                .net.out._NetManaged
+
+                                            local blockRemote =
+                                                netManaged:FindFirstChild(BlockHitRemoteName)
+
+                                            if blockRemote then
+                                                local args = {
+                                                    [1] = {
+                                                        [getgenv().HitAuraKey] =
+                                                            getgenv().HitAuraValue,
+
+                                                        ["part"] = hitPart,
+                                                        ["block"] = block,
+                                                        ["norm"] = hitPart.Position,
+
+                                                        ["pos"] = Vector3.new(
+                                                            math_random(-100, 100) / 100,
+                                                            math_random(0, 100) / 100,
+                                                            math_random(-100, 100) / 100
+                                                        )
+                                                    }
+                                                }
+
+                                                blockRemote:InvokeServer(unpack(args))
+                                            end
+                                        end
+                                    end)
+                                end)
                             end
                         end
                     end
                 end
             end
-            if hitCount == 0 then task_wait(0.2) end
+
+            task_wait(0.01)
         end
     end)
 end
-
 local function StartTreeAura()
     task_spawn(function()
         while toggleStates.TreeAura do
