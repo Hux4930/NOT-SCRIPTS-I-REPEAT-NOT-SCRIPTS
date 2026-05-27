@@ -1344,7 +1344,12 @@ local function pastePreview()
 				if not previewBlock or not previewBlock.Parent then
 					table.remove(pending, index)
 				else
-					local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
+local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
+					if distance > 50 then
+						local TweenService = game:GetService("TweenService")
+						local tween = TweenService:Create(humanoidRootPart, TweenInfo.new((distance / (30 * 16)), Enum.EasingStyle.Linear), {CFrame = CFrame.new(previewBlock.Position - (previewBlock.Position - humanoidRootPart.Position).Unit * 10)})
+						tween:Play() tween.Completed:Wait()
+					end
 					if distance <= 50 then
 						local success = placeBlockRequest(previewBlock.CFrame, previewBlock.Name)
 						if success then
@@ -1360,7 +1365,7 @@ local function pastePreview()
 			if didPlace then
 				noProgressLoops = 0
 				updatePreviewStatus()
-				task.wait(0.15)
+				task.wait(0.05)
 			else
 				noProgressLoops = noProgressLoops + 1
 				if noProgressLoops >= 10 then
