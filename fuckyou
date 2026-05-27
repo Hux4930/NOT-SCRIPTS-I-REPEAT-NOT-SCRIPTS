@@ -171,6 +171,7 @@ local pasteInProgress = false
 
 local placementHashName = nil
 local placementHashValue = nil
+local placementCaptureInstalled = false
 
 local selectionStartBlock = nil
 local selectionEndBlock = nil
@@ -657,6 +658,8 @@ local function getBlockControllerScript()
 	return blockFolder and blockFolder:FindFirstChild("block-controller")
 end
 
+local updateRemoteStatus
+
 local function savePlacementCache(hashName, hashValue)
 	local encoded = HttpService:JSONEncode({
 		placeVersion = game.PlaceVersion,
@@ -691,6 +694,94 @@ local function loadPlacementCache()
 	return decoded.hashName, decoded.hashValue
 end
 
+local function setActivePlacementHash(hashName, hashValue, sourceLabel)
+	if type(hashName) ~= "string" or hashName == "" or type(hashValue) ~= "string" or hashValue == "" then
+		return false
+	end
+
+	placementHashName = hashName
+	placementHashValue = hashValue
+	savePlacementCache(placementHashName, placementHashValue)
+
+	setRemoteDebugValue("BlockPlaceRemote", "CLIENT_BLOCK_PLACE_REQUEST")
+	setRemoteDebugValue("BlockPlaceHashData", placementHashName)
+	setRemoteDebugValue("BlockPlaceHash", placementHashValue)
+	updateRemoteStatus("placement hash ready (" .. tostring(sourceLabel or "unknown") .. ")")
+	return true
+end
+
+local function tryCapturePlacementHashFromPayload(payload, sourceLabel)
+	if type(payload) ~= "table" then
+		return false
+	end
+
+	local hasCFrame = payload.cframe ~= nil
+	local hasBlockType = payload.blockType ~= nil
+	if not hasCFrame or not hasBlockType then
+		return false
+	end
+
+	for key, value in pairs(payload) do
+		if type(key) == "string" and type(value) == "string" then
+			if key ~= "blockType" and key ~= "cframe" and key ~= "upperBlock" then
+				if setActivePlacementHash(key, value, sourceLabel) then
+					task.spawn(function()
+						notify("Remote", "Captured placement hash from a manual block place.", 4)
+					end)
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function tryCapturePlacementHashFromArgs(args, sourceLabel)
+	for _, arg in ipairs(args) do
+		if tryCapturePlacementHashFromPayload(arg, sourceLabel) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function installPlacementCaptureHook()
+	if placementCaptureInstalled then
+		return true
+	end
+
+	if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" or type(newcclosure) ~= "function" then
+		return false, "Your executor cannot hook __namecall for manual placement capture."
+	end
+
+	local oldNamecall
+	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+		local args = { ... }
+		local method = getnamecallmethod()
+
+		if method == "InvokeServer"
+			and typeof(self) == "Instance"
+			and self.Name == "CLIENT_BLOCK_PLACE_REQUEST"
+		then
+			local isGameCall = true
+			if type(checkcaller) == "function" then
+				isGameCall = not checkcaller()
+			end
+
+			if isGameCall then
+				tryCapturePlacementHashFromArgs(args, "manual placement")
+			end
+		end
+
+		return oldNamecall(self, ...)
+	end))
+
+	placementCaptureInstalled = true
+	return true
+end
+
 local function discoverPlacementHash()
 	if type(getgc) ~= "function" or type(getconstants) ~= "function" or type(getfenv) ~= "function" then
 		return nil, "Your executor is missing getgc/getconstants/getfenv."
@@ -722,20 +813,19 @@ local function discoverPlacementHash()
 	return nil, "Could not discover the placement hash."
 end
 
-local function updateRemoteStatus(text)
+updateRemoteStatus = function(text)
 	RemoteStatus:SetDesc(tostring(text))
 end
 
 local function resolvePlacementHash(forceRefresh)
+	if placementHashName and placementHashValue and not forceRefresh then
+		return true
+	end
+
 	if not forceRefresh then
 		local cachedName, cachedValue = loadPlacementCache()
 		if cachedName and cachedValue then
-			placementHashName = cachedName
-			placementHashValue = cachedValue
-			setRemoteDebugValue("BlockPlaceRemote", "CLIENT_BLOCK_PLACE_REQUEST")
-			setRemoteDebugValue("BlockPlaceHashData", placementHashName)
-			setRemoteDebugValue("BlockPlaceHash", placementHashValue)
-			updateRemoteStatus("using cached placement hash for this place version")
+			setActivePlacementHash(cachedName, cachedValue, "cache")
 			return true
 		end
 	end
@@ -746,14 +836,7 @@ local function resolvePlacementHash(forceRefresh)
 		return false, hashValueOrError
 	end
 
-	placementHashName = hashName
-	placementHashValue = hashValueOrError
-	savePlacementCache(placementHashName, placementHashValue)
-
-	setRemoteDebugValue("BlockPlaceRemote", "CLIENT_BLOCK_PLACE_REQUEST")
-	setRemoteDebugValue("BlockPlaceHashData", placementHashName)
-	setRemoteDebugValue("BlockPlaceHash", placementHashValue)
-	updateRemoteStatus("placement hash resolved and cached")
+	setActivePlacementHash(hashName, hashValueOrError, "auto scan")
 	return true
 end
 
@@ -822,11 +905,17 @@ RemoteSection:AddButton({
 	Title = "Resolve Placement Remote",
 	Description = "",
 	Callback = function()
+		local hookOk, hookErr = installPlacementCaptureHook()
+		if not hookOk then
+			notify("Remote", tostring(hookErr), 5)
+		end
+
 		local ok, err = resolvePlacementHash(true)
 		if ok then
 			notify("Remote", "Placement hash refreshed successfully.", 3)
 		else
-			notify("Remote", tostring(err), 5)
+			notify("Remote", tostring(err) .. " Place one block manually to capture the hash.", 6)
+			updateRemoteStatus("place one block manually to capture the placement hash")
 		end
 	end
 })
@@ -1320,11 +1409,21 @@ task.spawn(function()
 end)
 
 task.spawn(function()
+	local hookOk, hookErr = installPlacementCaptureHook()
+	if hookOk then
+		updateRemoteStatus("manual placement capture armed")
+	else
+		updateRemoteStatus(tostring(hookErr))
+	end
+
 	local ok, err = resolvePlacementHash(false)
 	if ok then
 		notify("Remote", "Placement hash ready.", 3)
 	else
-		notify("Remote", tostring(err), 5)
+		notify("Remote", tostring(err) .. " Place one block manually and the script should capture it.", 6)
+		if hookOk then
+			updateRemoteStatus("place one block manually to capture the placement hash")
+		end
 	end
 end)
 
