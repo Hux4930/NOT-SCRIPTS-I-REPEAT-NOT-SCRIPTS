@@ -135,10 +135,22 @@ local capturedHash = nil
 local captureInstalled = false
 local harvestRemote = nil
 
+-- Safe string conversion helper
+local function safeToString(value)
+    if value == nil then return "" end
+    if type(value) == "string" then return value end
+    return tostring(value)
+end
+
+-- Safe lower function
+local function safeLower(value)
+    return string.lower(safeToString(value))
+end
+
 -- Get NetManaged
 local function getNetManaged()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local ok, result = pcall(function()
+    local success, result = pcall(function()
         return ReplicatedStorage
             :WaitForChild("rbxts_include")
             :WaitForChild("node_modules")
@@ -148,7 +160,7 @@ local function getNetManaged()
             :WaitForChild("_NetManaged")
     end)
     
-    if ok then return result end
+    if success then return result end
     return nil
 end
 
@@ -249,10 +261,29 @@ end
 
 -- Calculate distance
 local function getDistance(pos1, pos2)
+    if type(pos1) ~= "Vector3" or type(pos2) ~= "Vector3" then
+        return math.huge
+    end
     return (pos1 - pos2).Magnitude
 end
 
--- Find all harvestable objects (FIXED)
+-- Safely get block position
+local function getBlockPosition(block)
+    if not block then return Vector3.new(0, 0, 0) end
+    
+    if block:IsA("BasePart") then
+        return block.Position
+    end
+    
+    local positionPart = block:FindFirstChild("Position")
+    if positionPart and positionPart:IsA("BasePart") then
+        return positionPart.Position
+    end
+    
+    return Vector3.new(0, 0, 0)
+end
+
+-- Find all harvestable objects (SAFE VERSION)
 local function findHarvestableObjects()
     statusLabel.Text = "Status: Scanning for harvestable objects..."
     harvestableObjects = {}
@@ -262,53 +293,72 @@ local function findHarvestableObjects()
     local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
     
     local Workspace = game:GetService("Workspace")
+    local islands = Workspace:FindFirstChild("Islands")
     
-    -- Scan islands
-    for _, island in pairs(Workspace.Islands:GetChildren()) do
-        local blocks = island:FindFirstChild("Blocks")
-        if blocks then
-            for _, block in pairs(blocks:GetChildren()) do
-                -- Get block name safely (handle numbers)
-                local blockName = tostring(block.Name)
-                local lowerName = blockName:lower()
-                
-                -- Check various harvestable types
-                local isHarvestable = false
-                local harvestType = "unknown"
-                
-                -- Check by name
-                if lowerName:find("berry") or lowerName:find("bush") then
-                    isHarvestable = true
-                    harvestType = "berry"
-                elseif lowerName:find("crop") or lowerName:find("wheat") or lowerName:find("carrot") or lowerName:find("potato") then
-                    isHarvestable = true
-                    harvestType = "crop"
-                elseif lowerName:find("tree") or lowerName:find("wood") then
-                    isHarvestable = true
-                    harvestType = "tree"
-                end
-                
-                -- Also check if it has Health (indicates harvestable block)
-                if not isHarvestable and block:FindFirstChild("Health") then
-                    isHarvestable = true
-                    harvestType = "block"
-                end
-                
-                if isHarvestable then
-                    local position = block:IsA("BasePart") and block.Position or 
-                                   (block:FindFirstChild("Position") and block.Position.Position) or
-                                   Vector3.new(0, 0, 0)
-                    
-                    local distance = getDistance(playerPos, position)
-                    
-                    table.insert(harvestableObjects, {
-                        name = blockName,
-                        model = block,
-                        island = tostring(island.Name),
-                        position = position,
-                        distance = distance,
-                        type = harvestType
-                    })
+    if not islands then
+        statusLabel.Text = "Status: No Islands found!"
+        listBox.Text = "No Islands found in workspace!"
+        return
+    end
+    
+    -- Safe iteration through islands
+    for _, island in ipairs(islands:GetChildren()) do
+        if not island:IsA("BasePart") then -- Skip parts
+            local blocks = island:FindFirstChild("Blocks")
+            if blocks then
+                -- Safe iteration through blocks
+                for _, block in ipairs(blocks:GetChildren()) do
+                    -- Skip non-models and non-parts
+                    if block:IsA("BasePart") or block:IsA("Model") then
+                        -- SAFE: Convert name to string properly
+                        local blockName = safeToString(block.Name)
+                        local lowerName = safeLower(blockName)
+                        
+                        -- Check various harvestable types
+                        local isHarvestable = false
+                        local harvestType = "unknown"
+                        
+                        -- Check by name
+                        if lowerName:find("berry") or lowerName:find("bush") then
+                            isHarvestable = true
+                            harvestType = "berry"
+                        elseif lowerName:find("crop") or lowerName:find("wheat") or 
+                               lowerName:find("carrot") or lowerName:find("potato") or
+                               lowerName:find("tomato") or lowerName:find("pumpkin") then
+                            isHarvestable = true
+                            harvestType = "crop"
+                        elseif lowerName:find("tree") or lowerName:find("wood") or lowerName:find("log") then
+                            isHarvestable = true
+                            harvestType = "tree"
+                        end
+                        
+                        -- Also check if it has Health (indicates harvestable block)
+                        if not isHarvestable and block:FindFirstChild("Health") then
+                            isHarvestable = true
+                            harvestType = "block"
+                        end
+                        
+                        -- Check for harvestable attribute
+                        if not isHarvestable and block:GetAttribute("Harvestable") then
+                            isHarvestable = true
+                            harvestType = "attribute"
+                        end
+                        
+                        if isHarvestable then
+                            -- SAFE: Get position
+                            local position = getBlockPosition(block)
+                            local distance = getDistance(playerPos, position)
+                            
+                            table.insert(harvestableObjects, {
+                                name = blockName,
+                                model = block,
+                                island = safeToString(island.Name),
+                                position = position,
+                                distance = distance,
+                                type = harvestType
+                            })
+                        end
+                    end
                 end
             end
         end
@@ -537,13 +587,16 @@ end
 -- Find initial objects
 findHarvestableObjects()
 
--- Keep refreshing periodically
+-- Keep refreshing periodically with error handling
 task.spawn(function()
     while true do
         task.wait(30)
+        local success, err = pcall(findHarvestableObjects)
+        if not success then
+            warn("Refresh failed:", err)
+        end
         if capturedHash then
             print("Hash still active - ready to harvest")
         end
-        findHarvestableObjects()
     end
 end)
