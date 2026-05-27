@@ -229,7 +229,6 @@ local function installHarvestCaptureHook()
             if isGameCall then
                 local captured = tryCaptureHarvestHashFromArgs(args, "manual harvest")
                 if captured then
-                    -- Play a little visual feedback
                     task.spawn(function()
                         statusLabel.Text = "Status: Hash captured from manual harvest!"
                         hashLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
@@ -253,7 +252,7 @@ local function getDistance(pos1, pos2)
     return (pos1 - pos2).Magnitude
 end
 
--- Find all harvestable objects
+-- Find all harvestable objects (FIXED)
 local function findHarvestableObjects()
     statusLabel.Text = "Status: Scanning for harvestable objects..."
     harvestableObjects = {}
@@ -268,13 +267,16 @@ local function findHarvestableObjects()
     for _, island in pairs(Workspace.Islands:GetChildren()) do
         local blocks = island:FindFirstChild("Blocks")
         if blocks then
-            for blockName, block in pairs(blocks:GetChildren()) do
+            for _, block in pairs(blocks:GetChildren()) do
+                -- Get block name safely (handle numbers)
+                local blockName = tostring(block.Name)
+                local lowerName = blockName:lower()
+                
                 -- Check various harvestable types
                 local isHarvestable = false
                 local harvestType = "unknown"
                 
                 -- Check by name
-                local lowerName = blockName:lower()
                 if lowerName:find("berry") or lowerName:find("bush") then
                     isHarvestable = true
                     harvestType = "berry"
@@ -302,7 +304,7 @@ local function findHarvestableObjects()
                     table.insert(harvestableObjects, {
                         name = blockName,
                         model = block,
-                        island = island.Name,
+                        island = tostring(island.Name),
                         position = position,
                         distance = distance,
                         type = harvestType
@@ -382,7 +384,7 @@ local function harvestObject(obj)
     end
 end
 
--- Harvest closest object (already sorted by distance)
+-- Harvest closest object
 local function harvestClosest()
     if #harvestableObjects == 0 then
         findHarvestableObjects()
@@ -463,13 +465,13 @@ local function harvestAll()
             if harvestObject(obj) then
                 successCount = successCount + 1
             end
-            task.wait(0.01) -- 0.01 second wait between harvests
+            task.wait(0.01) -- 0.01 second wait
         end
     end
     
     statusLabel.Text = string.format("Status: Complete! Harvested %d/%d objects", successCount, #harvestableObjects)
     
-    -- Refresh the list to remove harvested objects (they might still exist or be gone)
+    -- Refresh the list
     task.wait(1)
     findHarvestableObjects()
 end
@@ -535,14 +537,13 @@ end
 -- Find initial objects
 findHarvestableObjects()
 
--- Keep the script alive and print status periodically
+-- Keep refreshing periodically
 task.spawn(function()
     while true do
         task.wait(30)
         if capturedHash then
-            print("Hash still active:", capturedHash:sub(1, 30) .. "...")
+            print("Hash still active - ready to harvest")
         end
-        -- Refresh object list periodically
         findHarvestableObjects()
     end
 end)
