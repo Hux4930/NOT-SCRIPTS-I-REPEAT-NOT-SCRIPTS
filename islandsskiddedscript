@@ -1,0 +1,1343 @@
+local string_lower = string.lower
+local string_find = string.find
+local string_gsub = string.gsub
+local string_split = string.split
+local math_floor = math.floor
+local math_clamp = math.clamp
+local math_max = math.max
+local math_random = math.random
+local math_rad = math.rad
+local task_wait = task.wait
+local task_spawn = task.spawn
+local task_delay = task.delay
+local tick = tick
+local tostring = tostring
+local type = type
+local pairs = pairs
+local ipairs = ipairs
+local unpack = unpack or table.unpack
+local table_insert = table.insert
+local table_sort = table.sort
+local pcall = pcall
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local VIM = game:GetService("VirtualInputManager")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local virtualUser = game:GetService("VirtualUser")
+local ts = game:GetService("TeleportService")
+
+local lp = Players.LocalPlayer
+local cam = workspace.CurrentCamera
+
+local toggleStates = {
+    AutoFish = false, OreAura = false, TreeAura = false,
+    AutoCrop = false, AutoReplant = false, TeleportCrop = false, WildStarfruitTP = false,
+    SpiritFarm = false, KillAura = false, AirWalk = false, Noclip = false, CustomWalkSpeed = false
+}
+
+local blockNameCache = {}
+local function GetLowerBlockName(block)
+    if not blockNameCache[block] then
+        if not block or not block.Parent then return "" end
+        blockNameCache[block] = string_lower(block.Name)
+    end
+    return blockNameCache[block]
+end
+
+workspace.DescendantRemoving:Connect(function(descendant)
+    if blockNameCache[descendant] then blockNameCache[descendant] = nil end
+end)
+
+local BACKGROUND_IMAGE_ID = "rbxassetid://126416019328628" 
+local AVATAR_IMAGE_ID = "rbxassetid://96179899155244"     
+local SwizConnections = {}
+local GlobalBinds = {}
+
+getgenv().rainbowSpeed = 1 
+getgenv().pixelAnimEnabled = false 
+getgenv().antiAfkEnabled = false
+getgenv().SwizRainbowTabs = {} 
+local unlockChatEnabled = false
+local slideFromLeft = true
+local rainbowThemeEnabled = false
+local SwizUI = { Toggles = {}, Sliders = {}, Buttons = {}, TextBoxes = {} }
+
+table_insert(SwizConnections, UIS.InputBegan:Connect(function(input, gp)
+    if gp and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then if getgenv().ToggleSwizMenu then getgenv().ToggleSwizMenu() end; return end
+    if toggleStates.AirWalk then
+        if input.KeyCode == Enum.KeyCode.E then
+            if getgenv().CurrentPlatformY then getgenv().CurrentPlatformY = getgenv().CurrentPlatformY + 1 end
+        elseif input.KeyCode == Enum.KeyCode.Q then
+            if getgenv().CurrentPlatformY then getgenv().CurrentPlatformY = getgenv().CurrentPlatformY - 1 end
+        end
+    end
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        for _, bindObj in ipairs(GlobalBinds) do
+            if type(bindObj) == "table" and bindObj.GetBind and input.KeyCode == bindObj.GetBind() then if bindObj.ToggleFunc then bindObj.ToggleFunc() end end
+        end
+    end
+end))
+
+local ConfigFolder = "SwizibyConfig"
+local ActiveConfigLbl = nil
+local NotifyGui = Instance.new("ScreenGui", CoreGui)
+NotifyGui.Name = "SwizNotifications"
+NotifyGui.ResetOnSpawn = false
+NotifyGui.IgnoreGuiInset = true
+local NotifyList = Instance.new("Frame", NotifyGui)
+NotifyList.Size = UDim2.new(0, 250, 1, -20)
+NotifyList.Position = UDim2.new(1, -260, 0, 10)
+NotifyList.BackgroundTransparency = 1
+local NotifyLayout = Instance.new("UIListLayout", NotifyList)
+NotifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+NotifyLayout.Padding = UDim.new(0, 10)
+
+SwizUI.CurrentTheme = "Dark"
+SwizUI.Themes = {
+    Dark = { MainBg = Color3.fromRGB(18, 18, 22), SidebarBg = Color3.fromRGB(12, 12, 15), SectionBg = Color3.fromRGB(24, 24, 30), CardBg = Color3.fromRGB(28, 28, 36), Accent = Color3.fromRGB(140, 82, 255), AccentDark = Color3.fromRGB(100, 50, 200), Text = Color3.fromRGB(240, 240, 240), TextDim = Color3.fromRGB(140, 140, 140), Border = Color3.fromRGB(40, 40, 48), ToggleBtnBg = Color3.fromRGB(15, 15, 15), ToggleBtnText = Color3.fromRGB(240, 240, 240), ToggleBtnBorder = Color3.fromRGB(50, 50, 50), ActionBtnBg = Color3.fromRGB(24, 24, 30), ActionBtnText = Color3.fromRGB(240, 240, 240), ActionBtnBorder = Color3.fromRGB(40, 40, 48), CheckboxBg = Color3.fromRGB(18, 18, 22), CheckboxBorder = Color3.fromRGB(40, 40, 48), CheckboxFill = Color3.fromRGB(140, 82, 255) }
+}
+SwizUI.Colors = SwizUI.Themes[SwizUI.CurrentTheme]
+local ThemeElements = {}
+local function ApplyColor(obj, prop, role)
+    if not obj then return end
+    table_insert(ThemeElements, {Obj = obj, Prop = prop, Role = role})
+    pcall(function() obj[prop] = SwizUI.Colors[role] end)
+end
+local function ApplyTextStroke(obj)
+    if not obj then return end
+    local stroke = Instance.new("UIStroke", obj)
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.2
+end
+
+function SwizUI:Notify(titleText, descText)
+    local Notif = Instance.new("Frame", NotifyList)
+    Notif.Size = UDim2.new(1, 300, 0, 60); Notif.BackgroundTransparency = 0.1; Notif.BorderSizePixel = 1
+    Instance.new("UICorner", Notif).CornerRadius = UDim.new(0, 6)
+    ApplyColor(Notif, "BackgroundColor3", "SectionBg"); ApplyColor(Notif, "BorderColor3", "Border")
+    
+    local AccentBar = Instance.new("Frame", Notif)
+    AccentBar.Size = UDim2.new(0, 4, 1, 0); AccentBar.BorderSizePixel = 0
+    Instance.new("UICorner", AccentBar).CornerRadius = UDim.new(0, 6)
+    ApplyColor(AccentBar, "BackgroundColor3", "Accent")
+    
+    local Title = Instance.new("TextLabel", Notif)
+    Title.Size = UDim2.new(1, -20, 0, 20); Title.Position = UDim2.new(0, 15, 0, 10); Title.BackgroundTransparency = 1
+    Title.Text = titleText; Title.Font = Enum.Font.GothamBold; Title.TextSize = 14; Title.TextXAlignment = Enum.TextXAlignment.Left
+    ApplyColor(Title, "TextColor3", "Text")
+    
+    local Desc = Instance.new("TextLabel", Notif)
+    Desc.Size = UDim2.new(1, -20, 0, 30); Desc.Position = UDim2.new(0, 15, 0, 30); Desc.BackgroundTransparency = 1
+    Desc.Text = descText; Desc.Font = Enum.Font.Gotham; Desc.TextSize = 12; Desc.TextXAlignment = Enum.TextXAlignment.Left; Desc.TextWrapped = true
+    ApplyColor(Desc, "TextColor3", "TextDim")
+    
+    TweenService:Create(Notif, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 60)}):Play()
+    task_delay(3, function()
+        TweenService:Create(Notif, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Size = UDim2.new(1, 300, 0, 60)}):Play()
+        task_delay(0.3, function() Notif:Destroy() end)
+    end)
+end
+
+local function SaveConfig(name)
+    if not name or name == "" then name = "Default" end
+    local data = { rainbowEnabled = rainbowThemeEnabled, rainbowSpeed = getgenv().rainbowSpeed, pixelAnimEnabled = getgenv().pixelAnimEnabled, slideFromLeftEnabled = slideFromLeft, unlockChatEnabled = unlockChatEnabled, antiAfkEnabled = getgenv().antiAfkEnabled }
+    if writefile then
+        if not isfolder(ConfigFolder) then pcall(function() makefolder(ConfigFolder) end) end
+        local success, err = pcall(function() writefile(ConfigFolder .. "/" .. name .. ".json", HttpService:JSONEncode(data)) end)
+        if success then SwizUI:Notify("Config Saved", "Successfully saved config: " .. name) else SwizUI:Notify("Error", "Failed to save config: " .. tostring(err)) end
+    end
+end
+local function LoadSpecificConfig(name)
+    local filePath = ConfigFolder .. "/" .. name .. ".json"
+    if readfile and isfile and isfile(filePath) then
+        local readSuccess, rawData = pcall(function() return readfile(filePath) end)
+        if readSuccess and rawData then
+            local jsonSuccess, data = pcall(function() return HttpService:JSONDecode(rawData) end)
+            if jsonSuccess and data then
+                if data.rainbowEnabled ~= nil and SwizUI.Toggles.Rainbow then SwizUI.Toggles.Rainbow:Set(data.rainbowEnabled) end
+                if data.rainbowSpeed ~= nil and SwizUI.Sliders.RainbowSpeed then SwizUI.Sliders.RainbowSpeed:Set(data.rainbowSpeed) end
+                if data.pixelAnimEnabled ~= nil and SwizUI.Toggles.PixelAnim then SwizUI.Toggles.PixelAnim:Set(data.pixelAnimEnabled) end
+                if data.slideFromLeftEnabled ~= nil and SwizUI.Toggles.SlideMenu then SwizUI.Toggles.SlideMenu:Set(data.slideFromLeftEnabled) end
+                if data.unlockChatEnabled ~= nil and SwizUI.Toggles.UnlockChat then SwizUI.Toggles.UnlockChat:Set(data.unlockChatEnabled) end
+                if data.antiAfkEnabled ~= nil and SwizUI.Toggles.AntiAfk then SwizUI.Toggles.AntiAfk:Set(data.antiAfkEnabled) end
+                SwizUI:Notify("Config Loaded", "Loaded settings from: " .. name)
+                if ActiveConfigLbl then ActiveConfigLbl.Text = "Active Config: " .. name end
+            end
+        end
+    end
+end
+local function DeleteConfig(name)
+    local filePath = ConfigFolder .. "/" .. name .. ".json"
+    if isfile and isfile(filePath) and delfile then pcall(function() delfile(filePath) end); SwizUI:Notify("Config Deleted", "Removed config: " .. name) end
+end
+local function GetConfigFiles()
+    local files = {}
+    if listfiles then
+        if not isfolder(ConfigFolder) then pcall(function() makefolder(ConfigFolder) end) end
+        pcall(function()
+            for _, file in ipairs(listfiles(ConfigFolder)) do
+                if string_find(file, "%.json") then
+                    local splitPath = string_split(string_gsub(file, "\\", "/"), "/")
+                    local fileName = splitPath[#splitPath]
+                    local name = string_gsub(fileName, "%.json", "")
+                    if name then table_insert(files, name) end
+                end
+            end
+        end)
+    end
+    return files
+end
+
+local function UnloadCheat()
+    for _, conn in ipairs(SwizConnections) do if conn then conn:Disconnect() end end; SwizConnections = {}
+    if CoreGui:FindFirstChild("EternityHub") then CoreGui.EternityHub:Destroy() end
+    if CoreGui:FindFirstChild("SwizMobileToggle") then CoreGui.SwizMobileToggle:Destroy() end
+    if CoreGui:FindFirstChild("SwizNotifications") then CoreGui.SwizNotifications:Destroy() end
+    GlobalBinds = {}; getgenv().ToggleSwizMenu = nil; getgenv().SwizRainbowTabs = {}
+    
+    for k, v in pairs(toggleStates) do toggleStates[k] = false end
+    getgenv().AutoFishEnabled = false; getgenv().OreAuraEnabled = false; getgenv().AutoCropEnabled = false; getgenv().AutoReplantEnabled = false
+    getgenv().TeleportCropEnabled = false; getgenv().WildStarfruitTPEnabled = false; getgenv().AirWalkEnabled = false; getgenv().KillAuraEnabled = false
+    getgenv().ShowAuraRadius = false; getgenv().SpiritFarmEnabled = false
+end
+
+local originalValues = {}
+local AntilagV1L
+
+local MobileGui = Instance.new("ScreenGui", CoreGui)
+MobileGui.Name = "SwizMobileToggle"; MobileGui.ResetOnSpawn = false; MobileGui.IgnoreGuiInset = true
+local MobBtn = Instance.new("TextButton", MobileGui)
+MobBtn.Size = UDim2.new(0, 75, 0, 32); MobBtn.Position = UDim2.new(0, 15, 0.5, -22); MobBtn.BackgroundTransparency = 0.35 
+MobBtn.Text = "Toggle"; MobBtn.Font = Enum.Font.GothamBold; MobBtn.TextSize = 14; MobBtn.BorderSizePixel = 1; MobBtn.Visible = true 
+Instance.new("UICorner", MobBtn).CornerRadius = UDim.new(0, 6)
+ApplyColor(MobBtn, "BackgroundColor3", "ToggleBtnBg"); ApplyColor(MobBtn, "TextColor3", "ToggleBtnText"); ApplyColor(MobBtn, "BorderColor3", "ToggleBtnBorder")
+local mDragging, mDragInput, mDragStart, mStartPos
+table_insert(SwizConnections, MobBtn.MouseButton1Click:Connect(function() if getgenv().ToggleSwizMenu then getgenv().ToggleSwizMenu() end end))
+table_insert(SwizConnections, MobBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        mDragging = true; mDragStart = input.Position; mStartPos = MobBtn.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then mDragging = false end end)
+    end
+end))
+table_insert(SwizConnections, MobBtn.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then mDragInput = input end end))
+table_insert(SwizConnections, UIS.InputChanged:Connect(function(input) if input == mDragInput and mDragging then local delta = input.Position - mDragStart; MobBtn.Position = UDim2.new(mStartPos.X.Scale, mStartPos.X.Offset + delta.X, mStartPos.Y.Scale, mStartPos.Y.Offset + delta.Y) end end))
+
+function SwizUI:CreateWindow(title)
+    local UI = {Tabs = {}, CurrentTab = nil, CanvasTween = nil}
+    local ScreenGui = Instance.new("ScreenGui", CoreGui)
+    ScreenGui.Name = "EternityHub"; ScreenGui.ResetOnSpawn = false; ScreenGui.Enabled = false; ScreenGui.IgnoreGuiInset = true 
+    
+    local MainFrame = Instance.new("Frame", ScreenGui)
+    MainFrame.Name = "MainFrame"; MainFrame.Size = UDim2.new(0, 650, 0, 420); MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    MainFrame.Position = slideFromLeft and UDim2.new(-0.5, 0, 0.5, 0) or UDim2.new(0.5, 0, -0.5, 0)
+    MainFrame.BackgroundTransparency = 0.15; MainFrame.BorderSizePixel = 1; MainFrame.ClipsDescendants = true 
+    ApplyColor(MainFrame, "BackgroundColor3", "MainBg"); ApplyColor(MainFrame, "BorderColor3", "Border")
+    Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+    
+    local BgImage = Instance.new("ImageLabel", MainFrame)
+    BgImage.Size = UDim2.new(1, 0, 1, 0); BgImage.BackgroundTransparency = 1; BgImage.Image = BACKGROUND_IMAGE_ID
+    BgImage.ImageTransparency = 0.15; BgImage.ScaleType = Enum.ScaleType.Crop; BgImage.ZIndex = 0
+    
+    local menuVisible = false
+    local menuTween = nil
+    local function ToggleMenu()
+        if menuTween then menuTween:Cancel() end
+        menuVisible = not menuVisible
+        local targetPosHidden = slideFromLeft and UDim2.new(-0.5, 0, 0.5, 0) or UDim2.new(0.5, 0, -0.5, 0)
+        local targetPosCenter = UDim2.new(0.5, 0, 0.5, 0)
+        local tweenInfoMenu = TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        if menuVisible then
+            ScreenGui.Enabled = true
+            if not ScreenGui.Enabled then MainFrame.Position = targetPosHidden end
+            menuTween = TweenService:Create(MainFrame, tweenInfoMenu, {Position = targetPosCenter}); menuTween:Play()
+        else
+            menuTween = TweenService:Create(MainFrame, tweenInfoMenu, {Position = targetPosHidden}); menuTween:Play()
+            task_delay(0.4, function() if not menuVisible then ScreenGui.Enabled = false end end)
+        end
+    end
+    getgenv().ToggleSwizMenu = ToggleMenu
+    
+    local TopBar = Instance.new("Frame", MainFrame)
+    TopBar.Size = UDim2.new(1, 0, 0, 30); TopBar.BackgroundTransparency = 0.2; TopBar.BorderSizePixel = 0; TopBar.Active = true; TopBar.ZIndex = 2
+    ApplyColor(TopBar, "BackgroundColor3", "SidebarBg")
+    
+    local dragging, dragInput, dragStart, startPos
+    table_insert(SwizConnections, TopBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+            table_insert(SwizConnections, input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end))
+        end
+    end))
+    table_insert(SwizConnections, TopBar.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end end))
+    table_insert(SwizConnections, UIS.InputChanged:Connect(function(input) if input == dragInput and dragging then local delta = input.Position - dragStart; MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end))
+    
+    local TitleContainer = Instance.new("Frame", TopBar)
+    TitleContainer.Size = UDim2.new(1, -200, 1, 0); TitleContainer.Position = UDim2.new(0, 10, 0, 0); TitleContainer.BackgroundTransparency = 1
+    local TitleLabel = Instance.new("TextLabel", TitleContainer)
+    TitleLabel.Size = UDim2.new(1, 0, 1, 0); TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = title
+    TitleLabel.Font = Enum.Font.GothamBlack; TitleLabel.TextSize = 14; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    ApplyColor(TitleLabel, "TextColor3", "Text"); ApplyTextStroke(TitleLabel)
+    getgenv().SwizMenuTitleLetters = {TitleLabel} 
+    
+    local Sidebar = Instance.new("Frame", MainFrame)
+    Sidebar.Size = UDim2.new(0, 150, 1, -30); Sidebar.Position = UDim2.new(0, 0, 0, 30); Sidebar.BackgroundTransparency = 0.2
+    Sidebar.BorderSizePixel = 1; Sidebar.ZIndex = 2
+    ApplyColor(Sidebar, "BackgroundColor3", "SidebarBg"); ApplyColor(Sidebar, "BorderColor3", "Border")
+    
+    local TabContainer = Instance.new("ScrollingFrame", Sidebar)
+    TabContainer.Size = UDim2.new(1, 0, 1, -10); TabContainer.Position = UDim2.new(0, 0, 0, 10); TabContainer.BackgroundTransparency = 1
+    TabContainer.ScrollBarThickness = 0; TabContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y; TabContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+    local TabListLayout = Instance.new("UIListLayout", TabContainer); TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    
+    local ContentArea = Instance.new("Frame", MainFrame)
+    ContentArea.Size = UDim2.new(1, -150, 1, -30); ContentArea.Position = UDim2.new(0, 150, 0, 30); ContentArea.BackgroundTransparency = 1
+    ContentArea.ClipsDescendants = true; ContentArea.ZIndex = 2
+    
+    function UI:AddTab(name)
+        local TabObj = {Sections = {}}
+        local TabBtn = Instance.new("TextButton", TabContainer)
+        TabBtn.Size = UDim2.new(1, 0, 0, 35); TabBtn.BackgroundTransparency = 1; TabBtn.Text = "  " .. name
+        TabBtn.Font = Enum.Font.GothamBlack; TabBtn.TextSize = 13; TabBtn.TextXAlignment = Enum.TextXAlignment.Left
+        ApplyColor(TabBtn, "TextColor3", "TextDim"); table_insert(getgenv().SwizRainbowTabs, TabBtn) 
+        
+        local Indicator = Instance.new("Frame", TabBtn)
+        Indicator.Size = UDim2.new(0, 3, 1, -10); Indicator.Position = UDim2.new(0, 0, 0, 5); Indicator.BorderSizePixel = 0; Indicator.BackgroundTransparency = 1
+        ApplyColor(Indicator, "BackgroundColor3", "Accent")
+        
+        local Page = Instance.new("ScrollingFrame", ContentArea)
+        Page.Size = UDim2.new(1, -20, 1, -20); Page.Position = UDim2.new(1, 10, 0, 10); Page.BackgroundTransparency = 1
+        Page.ScrollBarThickness = 4; Page.Visible = true; Page.ClipsDescendants = false; Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        Page.CanvasSize = UDim2.new(0, 0, 0, 0); ApplyColor(Page, "ScrollBarImageColor3", "Accent")
+        local PageLayout = Instance.new("UIListLayout", Page); PageLayout.SortOrder = Enum.SortOrder.LayoutOrder; PageLayout.Padding = UDim.new(0, 10)
+        
+        table_insert(self.Tabs, {Btn = TabBtn, Ind = Indicator, Page = Page})
+        local tweenInfoCanvas = TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        local posCenter = UDim2.new(0, 10, 0, 10); local posLeft = UDim2.new(-1, -10, 0, 10); local posRight = UDim2.new(1, 10, 0, 10) 
+        
+        table_insert(SwizConnections, TabBtn.MouseButton1Click:Connect(function()
+            if UI.CurrentTab == Page then return end
+            if UI.CanvasTween then UI.CanvasTween:Cancel() end 
+            if UI.CurrentTab then TweenService:Create(UI.CurrentTab, tweenInfoCanvas, {Position = posLeft}):Play() end
+            Page.Position = posRight 
+            UI.CanvasTween = TweenService:Create(Page, tweenInfoCanvas, {Position = posCenter}); UI.CanvasTween:Play()
+            for _, t in ipairs(UI.Tabs) do
+                if not getgenv().rainbowThemeEnabled then TweenService:Create(t.Btn, TweenInfo.new(0.2), {TextColor3 = SwizUI.Colors.TextDim}):Play() end
+                TweenService:Create(t.Ind, TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
+            end
+            UI.CurrentTab = Page 
+            if not getgenv().rainbowThemeEnabled then TweenService:Create(TabBtn, TweenInfo.new(0.2), {TextColor3 = SwizUI.Colors.Text}):Play() end
+            TweenService:Create(Indicator, TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
+        end))
+        
+        if #self.Tabs == 1 then 
+            UI.CurrentTab = Page; Page.Position = posCenter; if not getgenv().rainbowThemeEnabled then TabBtn.TextColor3 = SwizUI.Colors.Text end; Indicator.BackgroundTransparency = 0 
+        end
+        
+        function TabObj:AddSection(engName, defaultCollapsed)
+            local SecObj = {}
+            local SecFrame = Instance.new("Frame", Page)
+            SecFrame.Name = "SectionFrame"; SecFrame.Size = UDim2.new(1, -10, 0, 30); SecFrame.BackgroundTransparency = 0.2; SecFrame.BorderSizePixel = 1
+            ApplyColor(SecFrame, "BackgroundColor3", "SectionBg"); ApplyColor(SecFrame, "BorderColor3", "Border")
+            
+            local SecTitle = Instance.new("TextLabel", SecFrame)
+            SecTitle.Size = UDim2.new(1, -40, 0, 30); SecTitle.Position = UDim2.new(0, 10, 0, 0); SecTitle.BackgroundTransparency = 1
+            SecTitle.Text = engName; SecTitle.Font = Enum.Font.GothamBlack; SecTitle.TextSize = 14; SecTitle.TextXAlignment = Enum.TextXAlignment.Left
+            ApplyColor(SecTitle, "TextColor3", "Accent"); ApplyTextStroke(SecTitle); table_insert(getgenv().SwizRainbowTabs, SecTitle)
+            
+            local CollapseBtn = Instance.new("TextButton", SecFrame)
+            CollapseBtn.Size = UDim2.new(0, 30, 0, 30); CollapseBtn.Position = UDim2.new(1, -30, 0, 0); CollapseBtn.BackgroundTransparency = 1
+            CollapseBtn.Text = defaultCollapsed and "▲" or "▼"; CollapseBtn.Font = Enum.Font.GothamBold; CollapseBtn.TextSize = 14
+            ApplyColor(CollapseBtn, "TextColor3", "TextDim")
+            
+            local SecContent = Instance.new("Frame", SecFrame)
+            SecContent.Name = "SecContent"; SecContent.Size = UDim2.new(1, 0, 1, -30); SecContent.Position = UDim2.new(0, 0, 0, 30); SecContent.BackgroundTransparency = 1
+            SecContent.Visible = not defaultCollapsed
+            local SecLayout = Instance.new("UIListLayout", SecContent); SecLayout.SortOrder = Enum.SortOrder.LayoutOrder; SecLayout.Padding = UDim.new(0, 5)
+            local isCollapsed = defaultCollapsed or false
+            
+            local function UpdateSize()
+                SecContent.Size = UDim2.new(1, 0, 0, SecLayout.AbsoluteContentSize.Y)
+                if isCollapsed then SecFrame.Size = UDim2.new(1, -10, 0, 30) else SecFrame.Size = UDim2.new(1, -10, 0, 30 + SecLayout.AbsoluteContentSize.Y + 5) end
+            end
+            table_insert(SwizConnections, CollapseBtn.MouseButton1Click:Connect(function()
+                isCollapsed = not isCollapsed; CollapseBtn.Text = isCollapsed and "▲" or "▼"; SecContent.Visible = not isCollapsed; UpdateSize()
+            end))
+            table_insert(SwizConnections, SecLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateSize))
+            
+            function SecObj:AddToggle(engText, default, callback)
+                local state = default or false; local ToggleObj = {}
+                local Tgl = Instance.new("TextButton", SecContent); Tgl.Size = UDim2.new(1, 0, 0, 30); Tgl.BackgroundTransparency = 1; Tgl.Text = ""
+                local Lbl = Instance.new("TextLabel", Tgl); Lbl.Size = UDim2.new(1, -40, 1, 0); Lbl.Position = UDim2.new(0, 10, 0, 0); Lbl.BackgroundTransparency = 1
+                Lbl.Text = engText; Lbl.Font = Enum.Font.GothamSemibold; Lbl.TextSize = 13; Lbl.TextXAlignment = Enum.TextXAlignment.Left; ApplyColor(Lbl, "TextColor3", "Text")
+                local Box = Instance.new("Frame", Tgl); Box.Size = UDim2.new(0, 16, 0, 16); Box.Position = UDim2.new(1, -26, 0.5, -8); Box.BorderSizePixel = 1
+                ApplyColor(Box, "BackgroundColor3", "CheckboxBg"); ApplyColor(Box, "BorderColor3", "CheckboxBorder")
+                local Fill = Instance.new("Frame", Box); Fill.Size = UDim2.new(1, -4, 1, -4); Fill.Position = UDim2.new(0, 2, 0, 2); Fill.BorderSizePixel = 0;
+                Fill.BackgroundTransparency = state and 0 or 1; ApplyColor(Fill, "BackgroundColor3", "CheckboxFill")
+                
+                function ToggleObj:Set(forceState)
+                    if forceState ~= nil then if state == forceState then return end; state = forceState else state = not state end
+                    TweenService:Create(Fill, TweenInfo.new(0.15), {BackgroundTransparency = state and 0 or 1}):Play(); if callback then pcall(callback, state) end
+                end
+                table_insert(SwizConnections, Tgl.MouseButton1Click:Connect(function() ToggleObj:Set() end)); return ToggleObj
+            end
+            
+            function SecObj:AddButton(engText, callback)
+                local Btn = Instance.new("TextButton", SecContent); Btn.Size = UDim2.new(1, -20, 0, 25); Btn.Position = UDim2.new(0, 10, 0, 0); Btn.BorderSizePixel = 1; Btn.Text = engText;
+                Btn.Font = Enum.Font.GothamBold; Btn.TextSize = 13; Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 4)
+                ApplyColor(Btn, "BackgroundColor3", "ActionBtnBg"); ApplyColor(Btn, "BorderColor3", "ActionBtnBorder"); ApplyColor(Btn, "TextColor3", "ActionBtnText")
+                table_insert(SwizConnections, Btn.MouseButton1Click:Connect(function() callback(Btn) end)); return Btn
+            end
+            
+            function SecObj:AddSlider(engText, min, max, default, callback)
+                local val = default or min; local SliderObj = {}
+                local SliderTgl = Instance.new("Frame", SecContent); SliderTgl.Size = UDim2.new(1, 0, 0, 45); SliderTgl.BackgroundTransparency = 1
+                local SLbl = Instance.new("TextLabel", SliderTgl); SLbl.Size = UDim2.new(1, -60, 0, 20); SLbl.Position = UDim2.new(0, 10, 0, 5); SLbl.BackgroundTransparency = 1
+                SLbl.Text = engText; SLbl.Font = Enum.Font.GothamSemibold; SLbl.TextSize = 12; SLbl.TextXAlignment = Enum.TextXAlignment.Left; ApplyColor(SLbl, "TextColor3", "TextDim")
+                local ValLbl = Instance.new("TextLabel", SliderTgl); ValLbl.Size = UDim2.new(0, 40, 0, 20); ValLbl.Position = UDim2.new(1, -50, 0, 5); ValLbl.BackgroundTransparency = 1
+                ValLbl.Text = tostring(val); ValLbl.Font = Enum.Font.GothamBold; ValLbl.TextSize = 12; ValLbl.TextXAlignment = Enum.TextXAlignment.Right; ApplyColor(ValLbl, "TextColor3", "Accent")
+                local SliderBg = Instance.new("TextButton", SliderTgl); SliderBg.Size = UDim2.new(1, -20, 0, 6); SliderBg.Position = UDim2.new(0, 10, 0, 30); SliderBg.BorderSizePixel = 1;
+                SliderBg.Text = ""
+                Instance.new("UICorner", SliderBg).CornerRadius = UDim.new(1, 0); ApplyColor(SliderBg, "BackgroundColor3", "MainBg"); ApplyColor(SliderBg, "BorderColor3", "Border")
+                local SFill = Instance.new("Frame", SliderBg); SFill.Size = UDim2.new(math_clamp((val - min) / (max - min), 0, 1), 0, 1, 0); SFill.BorderSizePixel = 0
+                Instance.new("UICorner", SFill).CornerRadius = UDim.new(1, 0); ApplyColor(SFill, "BackgroundColor3", "Accent")
+                
+                local dragging = false
+                local function updateSlider(input, forceVal)
+                    if forceVal then val = math_clamp(forceVal, min, max) else
+                        if not input or SliderBg.AbsoluteSize.X == 0 then return end
+                        local pos = math_clamp((input.Position.X - SliderBg.AbsolutePosition.X) / SliderBg.AbsoluteSize.X, 0, 1)
+                        val = math_floor(min + (max - min) * pos + 0.5); val = math_clamp(val, min, max)
+                    end
+                    SFill.Size = UDim2.new(math_clamp((val - min) / (max - min), 0, 1), 0, 1, 0); ValLbl.Text = tostring(val); callback(val)
+                end
+                table_insert(SwizConnections, SliderBg.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = true; updateSlider(input) end end))
+                table_insert(SwizConnections, UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end))
+                table_insert(SwizConnections, UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then updateSlider(input) end end))
+                
+                function SliderObj:Set(newVal) updateSlider(nil, math_clamp(newVal, min, max)) end; return SliderObj
+            end
+            
+            function SecObj:AddLabel(engText)
+                local Tgl = Instance.new("Frame", SecContent); Tgl.Size = UDim2.new(1, 0, 0, 25); Tgl.BackgroundTransparency = 1
+                local Lbl = Instance.new("TextLabel", Tgl); Lbl.Size = UDim2.new(1, -20, 1, 0); Lbl.Position = UDim2.new(0, 10, 0, 0); Lbl.BackgroundTransparency = 1
+                Lbl.Text = engText; Lbl.Font = Enum.Font.GothamSemibold; Lbl.TextSize = 12; Lbl.TextXAlignment = Enum.TextXAlignment.Left; ApplyColor(Lbl, "TextColor3", "TextDim")
+                return Lbl
+            end
+            return SecObj
+        end
+        return TabObj
+    end
+    return UI
+end
+
+getgenv().SelectedOres = {}; getgenv().EspSelectedOres = {}
+getgenv().SelectedTrees = {}; getgenv().EspSelectedTrees = {}
+getgenv().EspSelectedCrops = {}; getgenv().SelectedCrops = {}; getgenv().SelectedMobs = {}
+
+local BlockHitRemoteName = "CLIENT_BLOCK_HIT_REQUEST"
+local ignoreHitKeys = { ["part"] = true, ["block"] = true, ["norm"] = true, ["pos"] = true }
+local ignoreHarvestKeys = { ["player"] = true, ["model"] = true }
+local ignorePlaceKeys = { ["cframe"] = true, ["cropType"] = true, ["blockType"] = true, ["upperBlock"] = true }
+local ignoreMobKeys = { ["hitUnit"] = true }
+
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    if not checkcaller() then
+        if method == "InvokeServer" then
+            local rName = tostring(self)
+            local args = {...}
+            if args[1] and type(args[1]) == "table" then
+                if rName == BlockHitRemoteName then
+                    for k, v in pairs(args[1]) do
+                        if type(k) == "string" and not ignoreHitKeys[k] then
+                            if not getgenv().HitAuraKey then
+                                getgenv().HitAuraKey = k; getgenv().HitAuraValue = v
+                                task_spawn(function() if SwizUI and SwizUI.Notify then SwizUI:Notify("Success", "Hit key intercepted!") end end)
+                            end
+                            getgenv().HitAuraKey = k; getgenv().HitAuraValue = v
+                        end
+                    end
+                elseif string_find(rName, "HARVEST") then
+                    for k, v in pairs(args[1]) do
+                        if type(k) == "string" and not ignoreHarvestKeys[k] then
+                            if not getgenv().HarvestKey then
+                                getgenv().HarvestKey = k; getgenv().HarvestValue = v
+                                task_spawn(function() if SwizUI and SwizUI.Notify then SwizUI:Notify("Success", "Harvest key intercepted!") end end)
+                            end
+                            getgenv().HarvestKey = k; getgenv().HarvestValue = v
+                        end
+                    end
+                elseif string_find(rName, "PLACE") then
+                    for k, v in pairs(args[1]) do
+                        if type(k) == "string" and not ignorePlaceKeys[k] then
+                            if not getgenv().PlantKey then getgenv().PlantKey = k; getgenv().PlantValue = v end
+                            getgenv().PlantKey = k; getgenv().PlantValue = v
+                        end
+                    end
+                end
+            end
+        elseif method == "FireServer" then
+             local rName = tostring(self)
+            local args = {...}
+            if type(args[1]) == "string" and type(args[2]) == "table" and type(args[2][1]) == "table" then
+                if args[2][1]["hitUnit"] then
+                    for k, v in pairs(args[2][1]) do
+                        if type(k) == "string" and not ignoreMobKeys[k] then
+                            if not getgenv().MobHitKey then
+                                getgenv().MobHitKey = k; getgenv().MobHitValue = v; getgenv().MobHitRemoteName = rName
+                            end
+                            getgenv().MobHitKey = k; getgenv().MobHitValue = v; getgenv().MobHitRemoteName = rName
+                        end
+                    end
+                elseif args[2][1]["entity"] then 
+                    if not getgenv().SpiritCatchRemoteName then
+                        getgenv().SpiritCatchRemoteName = rName; getgenv().SpiritCatchArgs = args[2][1]
+                        task_spawn(function() if SwizUI and SwizUI.Notify then SwizUI:Notify("Success", "Spirit catch packet intercepted!") end end)
+                    end
+                    getgenv().SpiritCatchRemoteName = rName; getgenv().SpiritCatchArgs = args[2][1]
+                end
+            end
+        end
+    end
+    return oldNamecall(self, ...)
+end)
+
+local function GetEquippedTool()
+    local char = lp.Character; if not char then return nil end; return char:FindFirstChildWhichIsA("Tool")
+end
+
+local function SimulateMinigameClick()
+    local center = cam.ViewportSize / 2
+    VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.4); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+end
+
+local function GetFishingRod()
+    local char = lp.Character; if not char then return nil end
+    local items = char:GetChildren()
+    for _, v in ipairs(lp.Backpack:GetChildren()) do table_insert(items, v) end
+    for _, item in ipairs(items) do
+        if item:IsA("Tool") and (string_find(string_lower(item.Name), "rod") or string_find(string_lower(item.Name), "fishing")) then return item end
+    end
+    return nil
+end
+
+local function IsLookingAtWater()
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local params = RaycastParams.new(); params.FilterDescendantsInstances = {char}; params.FilterType = Enum.RaycastFilterType.Exclude
+    local result = workspace:Raycast(hrp.Position, (hrp.CFrame.LookVector * 15) + Vector3.new(0, -10, 0), params)
+    if result then
+        if result.Material == Enum.Material.Water then return true end
+        if result.Instance and string_find(string_lower(result.Instance.Name), "water") then return true end
+    end
+    return false
+end
+
+local cachedMinigame = nil
+local function GetMinigameUI()
+    if cachedMinigame and cachedMinigame.Parent and cachedMinigame.Visible then return cachedMinigame end
+    local pg = lp:FindFirstChild("PlayerGui"); if not pg then return nil end
+    local actionBar = pg:FindFirstChild("ActionBarScreenGui")
+    if actionBar then
+        cachedMinigame = actionBar:FindFirstChild("Minigame", true)
+        if cachedMinigame and cachedMinigame.Visible then return cachedMinigame end
+    end
+    return nil
+end
+
+local function StartAutoFish()
+    task_spawn(function()
+        while toggleStates.AutoFish do
+            local character = lp.Character; if not character then task_wait(1); continue end
+            local fishingRod = GetFishingRod()
+            if not fishingRod then SwizUI:Notify("Error", "Fishing rod not found!"); task_wait(2); continue end
+            if fishingRod.Parent ~= character then fishingRod.Parent = character; task_wait(0.5) end
+            if not IsLookingAtWater() then SwizUI:Notify("Waiting", "Face the water!"); task_wait(2); continue end
+            
+            fishingRod:Activate(); local waitTime = 0; local minigameUI = GetMinigameUI()
+            while not minigameUI and waitTime < 20 and toggleStates.AutoFish do
+                task_wait(0.5); waitTime = waitTime + 0.5; minigameUI = GetMinigameUI()
+            end
+            if minigameUI and toggleStates.AutoFish then
+                while minigameUI and minigameUI.Parent and minigameUI.Visible and toggleStates.AutoFish do
+                    SimulateMinigameClick(); task_wait(0.1); minigameUI = GetMinigameUI()
+                end
+                task_wait(1.5)
+            else
+                fishingRod:Activate(); task_wait(1.5)
+            end
+        end
+    end)
+end
+
+local espFolder = Instance.new("Folder")
+espFolder.Name = "SwizESP_Folder"; espFolder.Parent = CoreGui
+local espCache = {}; local highlightCache = {}
+
+local function IsAuraOreMatch(block)
+    local bName = GetLowerBlockName(block); local isRock = string_find(bName, "rock") or string_find(bName, "stone") or string_find(bName, "ore")
+    if getgenv().SelectedOres["all"] and isRock then return true end
+    for oreName, isEnabled in pairs(getgenv().SelectedOres) do if isEnabled and oreName ~= "all" and string_find(bName, oreName) then return true end end
+    return false
+end
+local function IsEspOreMatch(block)
+    local bName = GetLowerBlockName(block); local isRock = string_find(bName, "rock") or string_find(bName, "stone") or string_find(bName, "ore")
+    if getgenv().EspSelectedOres["all"] and isRock then return true end
+    for oreName, isEnabled in pairs(getgenv().EspSelectedOres) do if isEnabled and oreName ~= "all" and string_find(bName, oreName) then return true end end
+    return false
+end
+local function IsAuraTreeMatch(block)
+    local bName = GetLowerBlockName(block); if not string_find(bName, "tree") then return false end
+    if getgenv().SelectedTrees["all"] then return true end
+    for treeName, isEnabled in pairs(getgenv().SelectedTrees) do if isEnabled and treeName ~= "all" and string_find(bName, treeName) then return true end end
+    return false
+end
+local function IsEspTreeMatch(block)
+    local bName = GetLowerBlockName(block); if not string_find(bName, "tree") then return false end
+    if getgenv().EspSelectedTrees["all"] then return true end
+    for treeName, isEnabled in pairs(getgenv().EspSelectedTrees) do if isEnabled and treeName ~= "all" and string_find(bName, treeName) then return true end end
+    return false
+end
+local function IsEspCropMatch(block)
+    local bName = GetLowerBlockName(block)
+    if getgenv().EspSelectedCrops["all"] and (string_find(bName, "starfruit") or string_find(bName, "radish") or string_find(bName, "tomato") or string_find(bName, "nut") or string_find(bName, "onion") or string_find(bName, "carrot") or string_find(bName, "berry")) then return true end
+    for cropName, isEnabled in pairs(getgenv().EspSelectedCrops) do if isEnabled and cropName ~= "all" and string_find(bName, cropName) then return true end end
+    return false
+end
+
+local function GetFarmContainers()
+    local containers = {}
+    if workspace:FindFirstChild("WildernessBlocks") then table_insert(containers, workspace.WildernessBlocks) end
+    local islands = workspace:FindFirstChild("Islands")
+    if islands then
+        local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            for _, island in ipairs(islands:GetChildren()) do
+                local islandPos = island:GetPivot().Position
+                if (hrp.Position - islandPos).Magnitude <= 1000 then
+                    local blocks = island:FindFirstChild("Blocks"); if blocks then table_insert(containers, blocks) end
+                end
+            end
+        end
+    end
+    return containers
+end
+
+local function UpdateESP()
+    local anyEspOn = getgenv().OreEspTextEnabled or getgenv().OreEspHighlightEnabled or getgenv().TreeEspTextEnabled or getgenv().TreeEspHighlightEnabled or getgenv().CropEspTextEnabled or getgenv().CropEspHighlightEnabled
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+    local currentBlocks = {}
+    
+    if anyEspOn then
+        local containers = GetFarmContainers(); local blocksInRadius = {}
+        for _, container in ipairs(containers) do
+            for i, block in ipairs(container:GetChildren()) do
+                if i % 100 == 0 then task_wait() end
+                local isOre = IsEspOreMatch(block); local isTree = IsEspTreeMatch(block); local isCrop = IsEspCropMatch(block)
+                if isOre or isTree or isCrop then
+                    local hitPart = block:FindFirstChild("trunk") or block:FindFirstChild("1") or block:FindFirstChildWhichIsA("MeshPart") or block:FindFirstChildWhichIsA("BasePart")
+                    if hitPart and (hitPart:IsA("BasePart") or hitPart:IsA("MeshPart")) then
+                        local dist = (hrp.Position - hitPart.Position).Magnitude
+                        local maxDist = (isCrop) and 1000 or 150
+                        if dist <= maxDist then table_insert(blocksInRadius, {block = block, part = hitPart, dist = dist, isOre = isOre, isTree = isTree, isCrop = isCrop}) end
+                    end
+                end
+            end
+        end
+        table_sort(blocksInRadius, function(a, b) return a.dist < b.dist end)
+        local highlightCount = 0
+        
+        for _, data in ipairs(blocksInRadius) do
+             local block = data.block; local hitPart = data.part; local isOre = data.isOre; local isTree = data.isTree; local isCrop = data.isCrop
+            currentBlocks[block] = hitPart
+            local textEnabled = (isOre and getgenv().OreEspTextEnabled) or (isTree and getgenv().TreeEspTextEnabled) or (isCrop and getgenv().CropEspTextEnabled)
+            local hlEnabled = (isOre and getgenv().OreEspHighlightEnabled) or (isTree and getgenv().TreeEspHighlightEnabled) or (isCrop and getgenv().CropEspHighlightEnabled)
+            
+            local espColor = Color3.fromRGB(255, 255, 255)
+            if isOre then espColor = Color3.fromRGB(0, 255, 127) elseif isTree then espColor = Color3.fromRGB(255, 170, 0) elseif isCrop then espColor = Color3.fromRGB(255, 85, 255) end
+            
+            if textEnabled then
+                if not espCache[block] then
+                    local esp = Instance.new("BillboardGui"); esp.Name = "FarmESP_Text"; esp.Adornee = hitPart; esp.Size = UDim2.new(0, 100, 0, 25)
+                    esp.StudsOffset = Vector3.new(0, 2, 0); esp.AlwaysOnTop = true; esp.MaxDistance = 1000
+                    local txt = Instance.new("TextLabel", esp); txt.Size = UDim2.new(1, 0, 1, 0); txt.BackgroundTransparency = 1
+                    local displayName = block.Name; if isOre then displayName = string_gsub(displayName, "rock", ""); if displayName == "" then displayName = "Rock" end end
+                    txt.Text = displayName; txt.TextColor3 = espColor; txt.TextStrokeTransparency = 0.5; txt.Font = Enum.Font.GothamBold; txt.TextSize = 12
+                    esp.Parent = espFolder; espCache[block] = esp
+                else espCache[block].Enabled = true end
+            else if espCache[block] then espCache[block].Enabled = false end end
+            
+            if hlEnabled and highlightCount < 25 then
+                highlightCount = highlightCount + 1
+                if not highlightCache[block] then
+                    local hl = Instance.new("Highlight"); hl.Name = "FarmESP_HL"; hl.Adornee = hitPart; hl.FillColor = espColor; hl.FillTransparency = 0.4
+                    hl.OutlineColor = Color3.fromRGB(255, 255, 255); hl.OutlineTransparency = 0; hl.Parent = espFolder; highlightCache[block] = hl
+                else highlightCache[block].Enabled = true end
+            else if highlightCache[block] then highlightCache[block].Enabled = false end end
+        end
+    end
+    
+    for block, esp in pairs(espCache) do
+        if not block.Parent then esp:Destroy(); espCache[block] = nil elseif not currentBlocks[block] or not anyEspOn then esp.Enabled = false end
+    end
+    for block, hl in pairs(highlightCache) do
+        if not block.Parent then hl:Destroy(); highlightCache[block] = nil elseif not currentBlocks[block] or not anyEspOn then hl.Enabled = false end
+    end
+end
+task_spawn(function() while true do pcall(function() UpdateESP() end); task_wait(1) end end)
+
+local function StartOreAura()
+    task_spawn(function()
+        while toggleStates.OreAura do
+            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            if not getgenv().HitAuraKey then SwizUI:Notify("Waiting", "Hit an ore manually once to bypass!"); task_wait(3); continue end
+            local pickaxe = GetEquippedTool(); if not pickaxe then task_wait(1); continue end
+            local hitCount = 0; local containers = GetFarmContainers()
+            
+            for _, container in ipairs(containers) do
+                if not toggleStates.OreAura then break end
+                 for i, block in ipairs(container:GetChildren()) do
+                    if i % 30 == 0 then task_wait() end
+                    if not toggleStates.OreAura then break end
+                    if IsAuraOreMatch(block) then
+                        local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
+                        if hitPart and hitPart:IsA("BasePart") then
+                            local dist = (hrp.Position - hitPart.Position).Magnitude
+                            if dist <= getgenv().OreAuraRadius then
+task_spawn(function()
+    pcall(function()
+        local char2 = lp.Character
+        local hrp2 = char2 and char2:FindFirstChild("HumanoidRootPart")
+        if hrp2 then
+            local targetCFrame = CFrame.new(hitPart.Position + Vector3.new(0, 3, 0))
+            local dist2 = (hrp2.Position - targetCFrame.Position).Magnitude
+            local tweenInfo2 = TweenInfo.new(dist2 / 30, Enum.EasingStyle.Linear)
+            local moveTween = TweenService:Create(hrp2, tweenInfo2, {CFrame = targetCFrame})
+            moveTween:Play()
+            moveTween.Completed:Wait()
+        end
+
+        local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+        if netManaged then
+            netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+            local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
+            if blockRemote then
+                local args = { [1] = { [getgenv().HitAuraKey] = getgenv().HitAuraValue, ["part"] = hitPart, ["block"] = block, ["norm"] = hitPart.Position, ["pos"] = Vector3.new(math_random(-100, 100) / 100, math_random(0, 100) / 100, math_random(-100, 100) / 100) } }
+                blockRemote:InvokeServer(unpack(args))
+            end
+        end
+    end)
+end)
+                                hitCount = hitCount + 1; task_wait(math_random(10, 15) / 100)
+                            end
+                        end
+                    end
+                end
+            end
+            if hitCount == 0 then task_wait(0.2) end
+        end
+    end)
+end
+
+local function StartTreeAura()
+    task_spawn(function()
+        while toggleStates.TreeAura do
+            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            if not getgenv().HitAuraKey then SwizUI:Notify("Waiting", "Hit a tree manually once to bypass!"); task_wait(3); continue end
+            local axe = GetEquippedTool(); if not axe then task_wait(1); continue end
+            local hitCount = 0; local containers = GetFarmContainers()
+            
+            for _, container in ipairs(containers) do
+                if not toggleStates.TreeAura then break end
+                for _, block in ipairs(container:GetChildren()) do
+                    if not toggleStates.TreeAura then break end
+                    if IsAuraTreeMatch(block) then
+                        local hitPart = block:FindFirstChild("trunk") or block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
+                        if hitPart and hitPart:IsA("BasePart") then
+                            local dist = (hrp.Position - hitPart.Position).Magnitude
+                            if dist <= getgenv().TreeAuraRadius then
+                                task_spawn(function()
+                                    pcall(function()
+                                        local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+                                        if netManaged then
+                                            netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                                            local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
+                                            if blockRemote then
+                                                local args = { [1] = { [getgenv().HitAuraKey] = getgenv().HitAuraValue, ["part"] = hitPart, ["block"] = block, ["norm"] = hitPart.Position, ["pos"] = Vector3.new(math_random(-100, 100) / 100, math_random(0, 100) / 100, math_random(-100, 100) / 100) } }
+                                                blockRemote:InvokeServer(unpack(args))
+                                            end
+                                        end
+                                    end)
+                                end)
+                                hitCount = hitCount + 1; task_wait(math_random(10, 15) / 100)
+                            end
+                        end
+                    end
+                end
+            end
+            if hitCount == 0 then task_wait(0.2) end
+        end
+    end)
+end
+
+local function GetMyIsland()
+    local islandsFolder = workspace:FindFirstChild("Islands")
+    if islandsFolder then
+        for _, island in ipairs(islandsFolder:GetChildren()) do
+            local owners = island:FindFirstChild("Owners")
+            if owners and owners:FindFirstChild(tostring(lp.UserId)) then return island end
+        end
+    end
+    return nil
+end
+local function GetSelectedCropType()
+    for cropName, isEnabled in pairs(getgenv().SelectedCrops) do if isEnabled and cropName ~= "all" then return cropName end end; return "wheat"
+end
+
+local actionDebounce = {}
+function StartCropAura()
+    task_spawn(function()
+        local NetManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+        if NetManaged then NetManaged = NetManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged end
+        while toggleStates.AutoCrop or toggleStates.AutoReplant do
+            local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            local island = GetMyIsland(); if not island or not island:FindFirstChild("Blocks") then task_wait(1); continue end
+             
+            if toggleStates.AutoCrop and not getgenv().HarvestKey then
+                if not getgenv()._NotifiedCrop then getgenv()._NotifiedCrop = true; SwizUI:Notify("Waiting", "Harvest 1 crop manually to bypass!") end
+            end
+            if toggleStates.AutoReplant and not getgenv().PlantKey then
+                if not getgenv()._NotifiedPlant then getgenv()._NotifiedPlant = true; SwizUI:Notify("Waiting", "Plant 1 seed manually to bypass!") end
+            end
+            
+            local didAction = false; local allBlocks = island.Blocks:GetChildren(); local blocksCache = {}
+            for i, b in ipairs(allBlocks) do
+                if i % 50 == 0 then task_wait() end
+                if b.Name ~= "soil" then
+                    local p = b.Position
+                    blocksCache[math_floor(p.X + 0.5) .. "_" .. math_floor(p.Y + 0.5) .. "_" .. math_floor(p.Z + 0.5)] = true
+                end
+            end
+            
+            for i, block in ipairs(allBlocks) do
+                if i % 30 == 0 then task_wait() end
+                if not (toggleStates.AutoCrop or toggleStates.AutoReplant) then break end
+                local dist = (hrp.Position - block.Position).Magnitude
+                if dist > getgenv().CropAuraRadius then continue end
+                
+                local blockId = tostring(block:GetDebugId())
+                if actionDebounce[blockId] and tick() - actionDebounce[blockId] < 1.5 then continue end
+                
+                if toggleStates.AutoCrop and getgenv().HarvestKey then
+                    local mesh = block:FindFirstChildWhichIsA("MeshPart")
+                    if mesh and mesh:FindFirstChild("Harvestable") and mesh.Harvestable.Value == true then
+                        actionDebounce[blockId] = tick(); didAction = true
+                        task_spawn(function()
+                            local args = { [1] = { [getgenv().HarvestKey] = getgenv().HarvestValue, ["player"] = lp, ["model"] = block } }
+                            if NetManaged and NetManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST") then NetManaged.CLIENT_HARVEST_CROP_REQUEST:InvokeServer(unpack(args)) end
+                        end)
+                        task_wait(0.01); continue 
+                    end
+                end
+                
+                if toggleStates.AutoReplant and getgenv().PlantKey then
+                    if block.Name == "soil" then
+                        local upPos = block.Position + Vector3.new(0, 3, 0)
+                        local key = math_floor(upPos.X + 0.5) .. "_" .. math_floor(upPos.Y + 0.5) .. "_" .. math_floor(upPos.Z + 0.5)
+                        if not blocksCache[key] then
+                            actionDebounce[blockId] = tick(); didAction = true
+                            task_spawn(function()
+                                local args = { [1] = { [getgenv().PlantKey] = getgenv().PlantValue, ["cframe"] = block.CFrame * CFrame.new(0, 3, 0), ["blockType"] = GetSelectedCropType(), ["upperBlock"] = false } }
+                                if NetManaged and NetManaged:FindFirstChild("CLIENT_BLOCK_PLACE_REQUEST") then NetManaged.CLIENT_BLOCK_PLACE_REQUEST:InvokeServer(unpack(args)) end
+                            end)
+                            task_wait(0.02)
+                        end
+                    end
+                end
+            end
+            if not didAction then task_wait(0.1) end
+        end
+    end)
+end
+
+local function StartTeleportCrop()
+    task_spawn(function()
+        local NetManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+        if NetManaged then NetManaged = NetManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged end
+        while toggleStates.TeleportCrop do
+            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            local island = GetMyIsland(); if not island or not island:FindFirstChild("Blocks") then task_wait(1); continue end
+            
+            if not getgenv().HarvestKey then
+                if not getgenv()._NotifiedTpCrop then getgenv()._NotifiedTpCrop = true; SwizUI:Notify("Waiting", "Harvest 1 crop manually to intercept key (TP Farm)!") end
+                task_wait(2); continue
+            end
+            
+            local didAction = false; local allBlocks = island.Blocks:GetChildren()
+            local originalCFrame = hrp.CFrame; local harvestedCount = 0
+            
+            for i, block in ipairs(allBlocks) do
+                if not toggleStates.TeleportCrop then break end
+                if i % 30 == 0 then task_wait() end
+                
+                local mesh = block:FindFirstChildWhichIsA("MeshPart")
+                if mesh and mesh:FindFirstChild("Harvestable") and mesh.Harvestable.Value == true then
+                    hrp.CFrame = block.CFrame * CFrame.new(0, 3, 0); task_wait(0.15)
+                    task_spawn(function()
+                        local args = { [1] = { [getgenv().HarvestKey] = getgenv().HarvestValue, ["player"] = lp, ["model"] = block } }
+                        if NetManaged and NetManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST") then NetManaged.CLIENT_HARVEST_CROP_REQUEST:InvokeServer(unpack(args)) end
+                    end)
+                    harvestedCount = harvestedCount + 1; didAction = true; task_wait(0.1)
+                end
+            end
+            
+            if harvestedCount > 0 and toggleStates.TeleportCrop then hrp.CFrame = originalCFrame; task_wait(1.5) end
+            if not didAction then task_wait(0.5) end
+        end
+    end)
+end
+
+local function StartWildStarfruitFarm()
+    task_spawn(function()
+        local NetManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+        if NetManaged then NetManaged = NetManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged end
+        
+        local blacklistedBushes = {} 
+        local tempPlatform = Instance.new("Part"); tempPlatform.Name = "SwizTempPlatform"; tempPlatform.Size = Vector3.new(10, 1, 10); tempPlatform.Anchored = true; tempPlatform.CanCollide = true; tempPlatform.Transparency = 1
+        
+        while toggleStates.WildStarfruitTP do
+            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            local wildBlocks = workspace:FindFirstChild("WildernessBlocks"); if not wildBlocks then task_wait(1); continue end
+            
+            if not getgenv().HarvestKey then
+                if not getgenv()._NotifiedWildCrop then getgenv()._NotifiedWildCrop = true; SwizUI:Notify("Waiting", "Harvest any crop manually!") end
+                task_wait(2); continue
+            end
+            
+            local didAction = false; local originalCFrame = hrp.CFrame; local loopStartPos = hrp.Position; local harvestedCount = 0
+            if tempPlatform.Parent ~= workspace then tempPlatform.Parent = workspace end
+            
+            for i, block in ipairs(wildBlocks:GetChildren()) do
+                if not toggleStates.WildStarfruitTP then break end
+                if i % 30 == 0 then task_wait() end
+                
+                if string_find(string_lower(block.Name), "starfruit") then
+                    local mesh = block:FindFirstChildWhichIsA("MeshPart")
+                    if mesh and mesh:FindFirstChild("Harvestable") and mesh.Harvestable.Value == true and not blacklistedBushes[block] then
+                        if (loopStartPos - block.Position).Magnitude > 600 then continue end
+                        
+                        tempPlatform.CFrame = block.CFrame * CFrame.new(0, -1.5, 0); hrp.Anchored = false; hrp.CFrame = block.CFrame * CFrame.new(0, 1.5, 0); task_wait(8)
+                        
+                        local attempts = 0
+                        while mesh.Harvestable.Value == true and attempts < 5 and toggleStates.WildStarfruitTP do
+                            task_spawn(function()
+                                local args = { [1] = { [getgenv().HarvestKey] = getgenv().HarvestValue, ["player"] = lp, ["model"] = block } }
+                                if NetManaged and NetManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST") then NetManaged.CLIENT_HARVEST_CROP_REQUEST:InvokeServer(unpack(args)) end
+                            end)
+                            task_wait(0.5); attempts = attempts + 1
+                        end
+                        if mesh.Harvestable.Value == false then harvestedCount = harvestedCount + 1; didAction = true; task_wait(1.5) else blacklistedBushes[block] = true; task_wait(1.5) end
+                    end
+                end
+            end
+            if tempPlatform.Parent then tempPlatform.Parent = nil end
+            if harvestedCount > 0 and toggleStates.WildStarfruitTP then hrp.CFrame = originalCFrame; task_wait(2) end
+            if not didAction then task_wait(0.5) end
+        end
+        if tempPlatform then tempPlatform:Destroy() end
+    end)
+end
+
+local function GetNetTool()
+    local char = lp.Character; if not char then return nil end
+    local items = char:GetChildren(); for _, v in ipairs(lp.Backpack:GetChildren()) do table_insert(items, v) end
+    for _, item in ipairs(items) do
+        if item:IsA("Tool") then
+            local itemName = string_lower(item.Name)
+            if string_find(itemName, "net") or string_find(itemName, "spirit") or string_find(itemName, "catch") then return item end
+        end
+    end
+    return nil
+end
+
+local function StartSpiritFarm()
+    task_spawn(function()
+        local NetManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+        if NetManaged then NetManaged = NetManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged end
+        local center = cam.ViewportSize / 2
+        
+        while toggleStates.SpiritFarm do
+            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            if not getgenv().SpiritCatchRemoteName then
+                if not getgenv()._NotifiedSpirit then getgenv()._NotifiedSpirit = true; SwizUI:Notify("Waiting", "Catch 1 spirit manually!") end
+                task_wait(2); continue
+            end
+            
+            local netTool = GetNetTool()
+            if not netTool then
+                if not getgenv()._NotifiedNet then getgenv()._NotifiedNet = true; SwizUI:Notify("Waiting", "Equip your net!") end
+                task_wait(2); continue
+            end
+            if netTool.Parent ~= char then netTool.Parent = char; task_wait(0.3) end
+            
+            local caughtCount = 0; local entitiesFolders = {}
+            if workspace:FindFirstChild("WildernessIsland") and workspace.WildernessIsland:FindFirstChild("Entities") then table_insert(entitiesFolders, workspace.WildernessIsland.Entities) end
+            local islands = workspace:FindFirstChild("Islands")
+            if islands then for _, island in ipairs(islands:GetChildren()) do if island:FindFirstChild("Entities") then table_insert(entitiesFolders, island.Entities) end end end
+
+            for _, folder in ipairs(entitiesFolders) do
+                if not toggleStates.SpiritFarm then break end
+                for _, mob in ipairs(folder:GetChildren()) do
+                    if not toggleStates.SpiritFarm then break end
+                    if string_find(string_lower(mob.Name), "spirit") and mob:FindFirstChild("HumanoidRootPart") then
+                        local mobHrp = mob.HumanoidRootPart; local dist = (hrp.Position - mobHrp.Position).Magnitude
+                        if dist <= getgenv().SpiritAuraRadius and mobHrp.Parent then
+                            pcall(function()
+                                if netTool.Parent == char then netTool:Activate() end
+                                VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.01); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+                            end)
+                            task_spawn(function()
+                                pcall(function()
+                                    local remote = NetManaged:FindFirstChild(getgenv().SpiritCatchRemoteName)
+                                    if remote then
+                                        local packetData = getgenv().SpiritCatchArgs or {}; packetData["entity"] = mob 
+                                        remote:FireServer(unpack({ [1] = HttpService:GenerateGUID(false), [2] = { packetData } }))
+                                    end
+                                end)
+                            end)
+                            caughtCount = caughtCount + 1; task_wait(0.35)
+                        end
+                    end
+                end
+            end
+            if caughtCount == 0 then task_wait(0.2) end
+        end
+    end)
+end
+
+local function StartKillAura()
+    task_spawn(function()
+        local center = cam.ViewportSize / 2
+        while toggleStates.KillAura do
+            local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then task_wait(1); continue end
+            local tool = GetEquippedTool()
+            if not tool then
+                if not getgenv()._NotifiedTool then getgenv()._NotifiedTool = true; SwizUI:Notify("Waiting", "Equip your weapon (sword)!") end
+                task_wait(1); continue
+            end
+            if not getgenv().MobHitKey or not getgenv().MobHitRemoteName then
+                if not getgenv()._NotifiedKillAura then getgenv()._NotifiedKillAura = true; SwizUI:Notify("Waiting", "Hit a mob manually once to bypass!") end
+                task_wait(2); continue
+            end
+
+            local entitiesFolders = {}
+            if workspace:FindFirstChild("WildernessIsland") and workspace.WildernessIsland:FindFirstChild("Entities") then table_insert(entitiesFolders, workspace.WildernessIsland.Entities) end
+            local islands = workspace:FindFirstChild("Islands")
+            if islands then for _, island in ipairs(islands:GetChildren()) do if island:FindFirstChild("Entities") then table_insert(entitiesFolders, island.Entities) end end end
+
+            local hitCount = 0
+            for _, folder in ipairs(entitiesFolders) do
+                if not toggleStates.KillAura then break end
+                for i, mob in ipairs(folder:GetChildren()) do
+                    if i % 10 == 0 then task_wait() end
+                    if not toggleStates.KillAura then break end
+
+                    local mobName = string_lower(mob.Name); local isSelected = false
+                    if getgenv().SelectedMobs["all"] then isSelected = true else
+                        for mName, isEn in pairs(getgenv().SelectedMobs) do
+                            if isEn and mName ~= "all" and string_find(mobName, mName) then isSelected = true; break end
+                        end
+                    end
+
+                    if isSelected and mob:FindFirstChild("HumanoidRootPart") then
+                        local mobHrp = mob.HumanoidRootPart; local dist = (hrp.Position - mobHrp.Position).Magnitude
+                        if dist <= getgenv().KillAuraRadius and mobHrp.Parent then
+                            local singleHitPacket = { { [getgenv().MobHitKey] = getgenv().MobHitValue, ["hitUnit"] = mob } }
+                            pcall(function() VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.01); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1) end)
+                            task_spawn(function()
+                                pcall(function()
+                                    local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+                                    if netManaged then
+                                        netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                                        local mobRemote = netManaged:FindFirstChild(getgenv().MobHitRemoteName)
+                                        if mobRemote then mobRemote:FireServer(unpack({ [1] = HttpService:GenerateGUID(false), [2] = singleHitPacket })) end
+                                    end
+                                end)
+                            end)
+                            hitCount = hitCount + 1; task_wait(0.35) 
+                        end
+                    end
+                end
+            end
+            if hitCount == 0 then task_wait(0.2) end
+        end
+    end)
+end
+
+getgenv().CustomWalkSpeed = 16; getgenv().AirWalkRadius = 10; getgenv().CustomJumpPower = 50; getgenv().CurrentPlatformY = nil 
+local airPlatform = Instance.new("Part"); airPlatform.Name = "SwizAirPlatform"; airPlatform.Anchored = true; airPlatform.Transparency = 1; airPlatform.CanCollide = true; airPlatform.Size = Vector3.new(10, 1, 10); airPlatform.Parent = nil
+local isJumping = false
+
+local radiusVisualizer = Instance.new("Part"); radiusVisualizer.Name = "SwizAuraRadius"; radiusVisualizer.Shape = Enum.PartType.Cylinder; radiusVisualizer.Material = Enum.Material.Neon; radiusVisualizer.Color = Color3.fromRGB(255, 255, 255); radiusVisualizer.Transparency = 0.85; radiusVisualizer.Anchored = true; radiusVisualizer.CanCollide = false; radiusVisualizer.CastShadow = false; radiusVisualizer.Parent = nil
+
+RunService.RenderStepped:Connect(function()
+    if not getgenv().ShowAuraRadius then if radiusVisualizer.Parent then radiusVisualizer.Parent = nil end; return end
+    local currentRadius = 0
+    if toggleStates.OreAura then currentRadius = math_max(currentRadius, getgenv().OreAuraRadius or 0) end
+    if toggleStates.TreeAura then currentRadius = math_max(currentRadius, getgenv().TreeAuraRadius or 0) end
+    if toggleStates.KillAura then currentRadius = math_max(currentRadius, getgenv().KillAuraRadius or 0) end
+    if toggleStates.AutoCrop or toggleStates.AutoReplant then currentRadius = math_max(currentRadius, getgenv().CropAuraRadius or 0) end
+    if toggleStates.SpiritFarm then currentRadius = math_max(currentRadius, getgenv().SpiritAuraRadius or 0) end
+
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and currentRadius > 0 then
+        if radiusVisualizer.Parent ~= workspace then radiusVisualizer.Parent = workspace end
+        local diameter = currentRadius * 2; radiusVisualizer.Size = Vector3.new(0.05, diameter, diameter)
+        radiusVisualizer.CFrame = CFrame.new(hrp.Position.X, hrp.Position.Y - 2.9, hrp.Position.Z) * CFrame.Angles(0, 0, math_rad(90))
+    else if radiusVisualizer.Parent then radiusVisualizer.Parent = nil end end
+end)
+
+RunService.Heartbeat:Connect(function()
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if toggleStates.AirWalk and hrp and hum then
+        airPlatform.Size = Vector3.new(getgenv().AirWalkRadius, 1, getgenv().AirWalkRadius)
+        hum.UseJumpPower = true; hum.JumpPower = getgenv().CustomJumpPower
+        if not getgenv().CurrentPlatformY then getgenv().CurrentPlatformY = hrp.Position.Y - 3.25 end
+        if hum:GetState() == Enum.HumanoidStateType.Jumping then isJumping = true; airPlatform.CanCollide = false end
+        if isJumping and hrp.AssemblyLinearVelocity.Y < -1 then getgenv().CurrentPlatformY = hrp.Position.Y - 3.25; isJumping = false; airPlatform.CanCollide = true end
+        if airPlatform.Parent ~= workspace then airPlatform.Parent = workspace end
+        airPlatform.CFrame = CFrame.new(hrp.Position.X, getgenv().CurrentPlatformY, hrp.Position.Z)
+    else
+        if airPlatform.Parent == workspace then airPlatform.Parent = nil end; getgenv().CurrentPlatformY = nil; isJumping = false; if hum then hum.JumpPower = 50 end 
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    local char = lp.Character
+    if char and toggleStates.Noclip then
+        for _, v in ipairs(char:GetDescendants()) do if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end end
+    end
+end)
+
+RunService.RenderStepped:Connect(function(deltaTime)
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if char and hum and hrp and toggleStates.CustomWalkSpeed then
+        hum.WalkSpeed = getgenv().CustomWalkSpeed
+        if hum.MoveDirection.Magnitude > 0 then
+            local extraSpeed = getgenv().CustomWalkSpeed - 16
+            if extraSpeed > 0 then hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (extraSpeed * deltaTime)) end
+        end
+    end
+end)
+
+local function AntiLag()
+    pcall(function()
+        local Terrain = workspace:FindFirstChildOfClass('Terrain')
+        if Terrain then
+            originalValues.TerrainWaterWaveSize = Terrain.WaterWaveSize; originalValues.TerrainWaterWaveSpeed = Terrain.WaterWaveSpeed; originalValues.TerrainWaterReflectance = Terrain.WaterReflectance; originalValues.TerrainWaterTransparency = Terrain.WaterTransparency
+        end
+        originalValues.LightingGlobalShadows = Lighting.GlobalShadows; originalValues.LightingFogEnd = Lighting.FogEnd
+        pcall(function() originalValues.RenderingQualityLevel = settings().Rendering.QualityLevel end)
+
+        for _, v in pairs(game.Workspace:GetDescendants()) do
+            if v:IsA("MeshPart") and v.Parent and v.Parent.Name == "wheat" then
+                originalValues[v] = { Material = v.Material, Reflectance = v.Reflectance, MeshId = v.MeshId }; v.Material = Enum.Material.Plastic; v.Reflectance = 0; v.MeshId = ""
+            elseif v:IsA("BasePart") or v:IsA("UnionOperation") or v:IsA("CornerWedgePart") or v:IsA("TrussPart") then
+                originalValues[v] = { Material = v.Material, Reflectance = v.Reflectance }; v.Material = Enum.Material.Plastic; v.Reflectance = 0
+            elseif v:IsA("Decal") then originalValues[v] = { Transparency = v.Transparency }; v.Transparency = 1
+            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then originalValues[v] = { Lifetime = v.Lifetime }; v.Lifetime = NumberRange.new(0)
+            elseif v:IsA("Explosion") then originalValues[v] = { BlastPressure = v.BlastPressure, BlastRadius = v.BlastRadius }; v.BlastPressure = 1; v.BlastRadius = 1
+            end
+        end
+        for _, v in pairs(Lighting:GetDescendants()) do
+            if v:IsA("BlurEffect") or v:IsA("SunRaysEffect") or v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") or v:IsA("DepthOfFieldEffect") then
+                originalValues[v] = { Enabled = v.Enabled }; v.Enabled = false
+            end
+        end
+        local function handleDescendantAdded(child)
+            task_spawn(function()
+                local v = child
+                if v:IsA("MeshPart") and v.Parent and v.Parent.Name == "wheat" then
+                    originalValues[v] = { Material = v.Material, Reflectance = v.Reflectance, MeshId = v.MeshId }; v.Material = Enum.Material.Plastic; v.Reflectance = 0; v.MeshId = ""
+                elseif child:IsA('ForceField') or child:IsA('Sparkles') or child:IsA('Smoke') or child:IsA('Fire') then
+                    task_wait(); pcall(function() child:Destroy() end)
+                end
+            end)
+        end
+        AntilagV1L = workspace.DescendantAdded:Connect(handleDescendantAdded)
+    end)
+end
+
+local function UndoAntiLag()
+    pcall(function()
+        local Terrain = workspace:FindFirstChildOfClass('Terrain')
+        if Terrain and originalValues.TerrainWaterWaveSize then Terrain.WaterWaveSize = originalValues.TerrainWaterWaveSize; Terrain.WaterWaveSpeed = originalValues.TerrainWaterWaveSpeed; Terrain.WaterReflectance = originalValues.TerrainWaterReflectance; Terrain.WaterTransparency = originalValues.TerrainWaterTransparency end
+        if originalValues.LightingFogEnd then Lighting.FogEnd = originalValues.LightingFogEnd end
+        pcall(function() if originalValues.RenderingQualityLevel then settings().Rendering.QualityLevel = originalValues.RenderingQualityLevel end end)
+
+        for _, v in pairs(game.Workspace:GetDescendants()) do
+            if originalValues[v] then
+                if v:IsA("MeshPart") and v.Parent and v.Parent.Name == "wheat" then v.Material = originalValues[v].Material; v.Reflectance = originalValues[v].Reflectance; v.MeshId = originalValues[v].MeshId
+                elseif v:IsA("BasePart") or v:IsA("UnionOperation") or v:IsA("CornerWedgePart") or v:IsA("TrussPart") then v.Material = originalValues[v].Material; v.Reflectance = originalValues[v].Reflectance
+                elseif v:IsA("Decal") then v.Transparency = originalValues[v].Transparency
+                elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then v.Lifetime = originalValues[v].Lifetime
+                elseif v:IsA("Explosion") then v.BlastPressure = originalValues[v].BlastPressure; v.BlastRadius = originalValues[v].BlastRadius
+                end
+                originalValues[v] = nil
+            end
+        end
+        for _, v in pairs(Lighting:GetDescendants()) do if originalValues[v] then v.Enabled = originalValues[v].Enabled; originalValues[v] = nil end end
+        if AntilagV1L then AntilagV1L:Disconnect(); AntilagV1L = nil end
+    end)
+end
+
+local Window = SwizUI:CreateWindow("Eternity Source")
+local TabMain = Window:AddTab("Main")
+
+local SecVisuals = TabMain:AddSection("Visuals", false)
+SecVisuals:AddToggle("Show Aura Radius", false, function(state) getgenv().ShowAuraRadius = state end)
+
+local SecMovement = TabMain:AddSection("Movement")
+SecMovement:AddToggle("Enable Smart Platform", false, function(state) toggleStates.AirWalk = state; getgenv().AirWalkEnabled = state end)
+SecMovement:AddSlider("Platform Radius", 2, 50, 10, function(val) getgenv().AirWalkRadius = math_floor(val) end)
+SecMovement:AddSlider("Jump Power (Height)", 50, 250, 50, function(val) getgenv().CustomJumpPower = math_floor(val) end)
+SecMovement:AddButton("Platform UP (+1m) [Key: E]", function() if getgenv().CurrentPlatformY then getgenv().CurrentPlatformY = getgenv().CurrentPlatformY + 1 end end)
+SecMovement:AddButton("Platform DOWN (-1m) [Key: Q]", function() if getgenv().CurrentPlatformY then getgenv().CurrentPlatformY = getgenv().CurrentPlatformY - 1 end end)
+SecMovement:AddToggle("Noclip", false, function(state) toggleStates.Noclip = state; getgenv().NoclipEnabled = state end)
+SecMovement:AddToggle("Custom WalkSpeed", false, function(state) toggleStates.CustomWalkSpeed = state; getgenv().CustomWalkSpeedEnabled = state end)
+SecMovement:AddSlider("Speed Amount", 16, 250, 16, function(val) getgenv().CustomWalkSpeed = val end)
+
+local TabCombat = Window:AddTab("Combat")
+local SecKillAura = TabCombat:AddSection("Kill Aura Settings")
+local SecMobList = TabCombat:AddSection("Select Mobs", true)
+SecKillAura:AddToggle("Enable Kill Aura", false, function(state) toggleStates.KillAura = state; getgenv().KillAuraEnabled = state; if state then StartKillAura() end end)
+SecKillAura:AddSlider("Aura Radius (Studs)", 5, 30, 15, function(val) getgenv().KillAuraRadius = math_floor(val) end)
+
+local SecSpirit = TabCombat:AddSection("Spirit Farm")
+SecSpirit:AddToggle("Enable Spirit Aura", false, function(state) toggleStates.SpiritFarm = state; getgenv().SpiritFarmEnabled = state; if state then StartSpiritFarm() end end)
+SecSpirit:AddSlider("Aura Radius (Studs)", 5, 40, 20, function(val) getgenv().SpiritAuraRadius = math_floor(val) end)
+local mobList = { ["All Mobs"] = "all", ["Slime"] = "slime", ["Buffalkor"] = "buffalkor", ["Wizard"] = "wizard", ["Scorpion"] = "scorpion", ["Bhaa"] = "bhaa", ["Kor"] = "kor", ["Slime King"] = "king", ["Desert Mobs"] = "desert" }
+for dispName, internalName in pairs(mobList) do SecMobList:AddToggle(dispName, false, function(state) getgenv().SelectedMobs[internalName] = state end) end
+
+local TabFish = Window:AddTab("Auto Fish")
+local SecFish = TabFish:AddSection("Fishing Settings")
+SecFish:AddToggle("Enable Auto Fish (HIGH RISK 99% BANNED)", false, function(state) toggleStates.AutoFish = state; getgenv().AutoFishEnabled = state; if state then StartAutoFish() end end)
+
+local TabOres = Window:AddTab("Ore Aura")
+local SecOres = TabOres:AddSection("Aura Settings")
+local SecAuraList = TabOres:AddSection("Select Ores (AURA)", true)
+local SecEspList = TabOres:AddSection("Select Ores (ESP) [150m]", true)
+SecOres:AddToggle("Enable Ore Aura", false, function(state) toggleStates.OreAura = state; getgenv().OreAuraEnabled = state; if state then StartOreAura() end end)
+SecOres:AddToggle("Enable Ore ESP (Text)", false, function(state) getgenv().OreEspTextEnabled = state end)
+SecOres:AddToggle("Enable ESP Highlights", false, function(state) getgenv().OreEspHighlightEnabled = state end)
+SecOres:AddSlider("Aura Radius (Blocks)", 1, 20, 12, function(val) getgenv().OreAuraRadius = math_floor(val + 0.5) end)
+local oreList = { ["All Rocks"] = "all", ["Stone"] = "stone", ["Coal"] = "coal", ["Iron"] = "iron", ["Gold"] = "gold", ["Diamond"] = "diamond", ["Amethyst"] = "amethyst", ["Obsidian"] = "obsidian", ["Copper"] = "copper", ["Electrite"] = "electrite" }
+for dispName, internalName in pairs(oreList) do SecAuraList:AddToggle(dispName, false, function(state) getgenv().SelectedOres[internalName] = state end); SecEspList:AddToggle(dispName, false, function(state) getgenv().EspSelectedOres[internalName] = state end) end
+
+local TabTrees = Window:AddTab("Tree Aura")
+local SecTrees = TabTrees:AddSection("Aura Settings")
+local SecTreeAuraList = TabTrees:AddSection("Select Trees (AURA)", true)
+local SecTreeEspList = TabTrees:AddSection("Select Trees (ESP) [150m]", true)
+SecTrees:AddToggle("Enable Tree Aura", false, function(state) toggleStates.TreeAura = state; getgenv().TreeAuraEnabled = state; if state then StartTreeAura() end end)
+SecTrees:AddToggle("Enable Tree ESP (Text)", false, function(state) getgenv().TreeEspTextEnabled = state end)
+SecTrees:AddToggle("Enable ESP Highlights", false, function(state) getgenv().TreeEspHighlightEnabled = state end)
+SecTrees:AddSlider("Aura Radius (Blocks)", 1, 25, 17, function(val) getgenv().TreeAuraRadius = math_floor(val + 0.5) end)
+local treeList = { ["All Trees"] = "all", ["Pine"] = "pine", ["Birch"] = "birch", ["Hickory"] = "hickory", ["Maple"] = "maple", ["Spirit"] = "spirit" }
+for dispName, internalName in pairs(treeList) do SecTreeAuraList:AddToggle(dispName, false, function(state) getgenv().SelectedTrees[internalName] = state end); SecTreeEspList:AddToggle(dispName, false, function(state) getgenv().EspSelectedTrees[internalName] = state end) end
+
+local TabFarming = Window:AddTab("Farming")
+local SecFarm = TabFarming:AddSection("Farming Settings")
+local SecCropList = TabFarming:AddSection("Select Crops (Aura)", true)
+local SecCropEspList = TabFarming:AddSection("Select Crops (ESP) [1000m]", true)
+SecFarm:AddToggle("Enable Teleport Crop Farm", false, function(state) toggleStates.TeleportCrop = state; getgenv().TeleportCropEnabled = state; if state then StartTeleportCrop() end end)
+SecFarm:AddToggle("Enable Wild Crop TP Farm [600m]", false, function(state) toggleStates.WildStarfruitTP = state; getgenv().WildStarfruitTPEnabled = state; if state then StartWildStarfruitFarm() end end)
+SecFarm:AddToggle("Enable Crop ESP (Text) [1000m]", false, function(state) getgenv().CropEspTextEnabled = state end)
+SecFarm:AddToggle("Enable Crop ESP Highlights [1000m]", false, function(state) getgenv().CropEspHighlightEnabled = state end)
+SecFarm:AddToggle("Enable Auto Crop (Aura)", false, function(state) toggleStates.AutoCrop = state; getgenv().AutoCropEnabled = state; if state and not toggleStates.AutoReplant then StartCropAura() end end)
+SecFarm:AddToggle("Enable Auto Replant", false, function(state) toggleStates.AutoReplant = state; getgenv().AutoReplantEnabled = state; if state and not toggleStates.AutoCrop then StartCropAura() end end)
+SecFarm:AddSlider("Aura Radius (Blocks)", 1, 30, 30, function(val) getgenv().CropAuraRadius = math_floor(val + 0.5) end)
+local cropList = { ["All Crops"] = "all", ["Wheat"] = "wheat", ["Carrot"] = "carrot", ["Tomato"] = "tomato", ["Onion"] = "onion", ["Potato"] = "potato", ["Radish"] = "radish", ["Starfruit"] = "starfruit", ["Watermelon"] = "watermelon", ["Pumpkin"] = "pumpkin" }
+for dispName, internalName in pairs(cropList) do SecCropList:AddToggle(dispName, false, function(state) getgenv().SelectedCrops[internalName] = state end) end
+local espCropList = { ["All Wild Crops"] = "all", ["Starfruit"] = "starfruit", ["Horseradish"] = "radish", ["Tomato"] = "tomato", ["Hickory Nut"] = "nut", ["Onion"] = "onion", ["Carrot"] = "carrot" }
+for dispName, internalName in pairs(espCropList) do SecCropEspList:AddToggle(dispName, false, function(state) getgenv().EspSelectedCrops[internalName] = state end) end
+
+local TabTeleport = Window:AddTab("Teleport")
+local SecTeleport = TabTeleport:AddSection("Locations")
+getgenv().TeleportMethod = "Instant"; getgenv().TweenSpeed = 50; local currentTween = nil
+local function StopTeleport() if currentTween then currentTween:Cancel(); currentTween = nil; SwizUI:Notify("Teleport", "Tween movement stopped.") end end
+local function DoTeleport(targetCFrame)
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+    if currentTween then currentTween:Cancel(); currentTween = nil end
+    if getgenv().TeleportMethod == "Tween" then
+        local dist = (hrp.Position - targetCFrame.Position).Magnitude; local ti = TweenInfo.new(dist / getgenv().TweenSpeed, Enum.EasingStyle.Linear)
+        currentTween = TweenService:Create(hrp, ti, {CFrame = targetCFrame}); currentTween:Play()
+    else hrp.CFrame = targetCFrame end
+end
+SecTeleport:AddToggle("Use Tween Teleport", false, function(state) getgenv().TeleportMethod = state and "Tween" or "Instant" end)
+SecTeleport:AddSlider("Tween Speed", 20, 300, 50, function(val) getgenv().TweenSpeed = val end)
+SecTeleport:AddButton("🛑 Stop Tween Movement", function() StopTeleport() end)
+SecTeleport:AddButton("Home (Island)", function()
+    local island = GetMyIsland()
+    if island then
+        local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+        if netManaged then netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged; if netManaged and netManaged:FindFirstChild("CLIENT_VISIT_ISLAND_REQUEST") then netManaged.CLIENT_VISIT_ISLAND_REQUEST:InvokeServer(unpack({ [1] = { ["island"] = island } })) end end
+    end
+end)
+SecTeleport:AddButton("Hub", function()
+    local Portal = nil; local island = GetMyIsland()
+    if island and island:FindFirstChild("Blocks") then
+        for _, v in pairs(island.Blocks:GetChildren()) do if v:FindFirstChild("PortalActive") and v:FindFirstChild("portal-to-spawn") then Portal = v; break end end 
+    end
+    if Portal then local cb = Portal:FindFirstChild("CollisionBoxes"); if cb and cb:FindFirstChild("Part") then DoTeleport(cb.Part.CFrame) end else
+        local Portal2 = workspace:FindFirstChild("portalToSpawn", true); if Portal2 then local cb = Portal2:FindFirstChild("CollisionBoxes"); if cb and cb:FindFirstChild("Part") then DoTeleport(cb.Part.CFrame) end end
+    end
+end)
+SecTeleport:AddButton("Slime Island", function() DoTeleport(CFrame.new(151.095, 37.135, -734.216)) end)
+SecTeleport:AddButton("Buffalkor Island", function() DoTeleport(CFrame.new(885.378, 180.972, 23.214)) end)
+SecTeleport:AddButton("Wizard Island", function() DoTeleport(CFrame.new(1709.623, 448.131, -204.412)) end)
+SecTeleport:AddButton("Desert Island", function() DoTeleport(CFrame.new(1475.444, 342.177, -875.548)) end)
+SecTeleport:AddButton("Underworld / Mine", function() DoTeleport(CFrame.new(686.588, 200.419, -229.044)); task_spawn(function() task_wait(3); DoTeleport(CFrame.new(251.067, 25.952, -635.416)) end) end)
+SecTeleport:AddButton("Pirate Island", function()
+    local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+    if netManaged then netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged; if netManaged and netManaged:FindFirstChild("TravelPirateIsland") then netManaged.TravelPirateIsland:FireServer(false) end end
+end)
+SecTeleport:AddButton("Spirit Island", function() DoTeleport(CFrame.new(654.445, 184.972, -134.859)) end)
+
+local TabMisc = Window:AddTab("Misc")
+local SecMisc = TabMisc:AddSection("Extra Features")
+SwizUI.Toggles.AntiAfk = SecMisc:AddToggle("Anti-AFK (Prevent Kick)", false, function(v) getgenv().antiAfkEnabled = v end)
+SwizUI.Toggles.UnlockChat = SecMisc:AddToggle("Unlock Chat in Match", false, function(v) unlockChatEnabled = v end)
+SecMisc:AddToggle("Anti-Lag (Textures & FX)", false, function(state) if state then AntiLag() else UndoAntiLag() end end)
+SecMisc:AddToggle("Disable XP Listener (Reduce Lag)", false, function(state) pcall(function() local expListener = lp.PlayerScripts.TS.modules.experience["experience-listener"]; if expListener then expListener.Disabled = state end end) end)
+SecMisc:AddButton("Unload & Rejoin", function() UnloadCheat(); ts:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp) end)
+SecMisc:AddButton("Unhook / Unload Cheat", function() UnloadCheat() end)
+
+pcall(function() LoadSpecificConfig("Default") end)
+task_delay(0.2, function() if getgenv().ToggleSwizMenu then getgenv().ToggleSwizMenu() end end)
+
+table_insert(SwizConnections, lp.Idled:Connect(function()
+    if getgenv().antiAfkEnabled then pcall(function() virtualUser:CaptureController(); virtualUser:ClickButton2(Vector2.new()); SwizUI:Notify("Anti-AFK", "Prevented idle kick.") end) end
+end))
+
+task_spawn(function()
+    while true do
+        if unlockChatEnabled then
+            pcall(function() 
+                game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true); local pg = lp:FindFirstChild("PlayerGui")
+                if pg then local chatUI = pg:FindFirstChild("Chat"); if chatUI then chatUI.Enabled = true; if chatUI:FindFirstChild("Frame") then chatUI.Frame.Visible = true end end
+                local tcs = game:GetService("TextChatService"); local chatWin = tcs:FindFirstChild("ChatWindowConfiguration"); if chatWin then chatWin.Enabled = true end; local chatInp = tcs:FindFirstChild("ChatInputBarConfiguration"); if chatInp then chatInp.Enabled = true end end
+            end)
+        end
+        task_wait(0.5)
+    end
+end)
