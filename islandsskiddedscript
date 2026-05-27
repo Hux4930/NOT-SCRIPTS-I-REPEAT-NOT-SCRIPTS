@@ -518,7 +518,7 @@ end
 
 local function SimulateMinigameClick()
     local center = cam.ViewportSize / 2
-    VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.4); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+    VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.01); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
 end
 
 local function GetFishingRod()
@@ -561,16 +561,16 @@ local function StartAutoFish()
             local character = lp.Character; if not character then task_wait(1); continue end
             local fishingRod = GetFishingRod()
             if not fishingRod then SwizUI:Notify("Error", "Fishing rod not found!"); task_wait(2); continue end
-            if fishingRod.Parent ~= character then fishingRod.Parent = character; task_wait(0.5) end
+            if fishingRod.Parent ~= character then fishingRod.Parent = character; task_wait(0.01) end
             if not IsLookingAtWater() then SwizUI:Notify("Waiting", "Face the water!"); task_wait(2); continue end
             
             fishingRod:Activate(); local waitTime = 0; local minigameUI = GetMinigameUI()
             while not minigameUI and waitTime < 20 and toggleStates.AutoFish do
-                task_wait(0.5); waitTime = waitTime + 0.5; minigameUI = GetMinigameUI()
+                task_wait(0.01); waitTime = waitTime + 0.5; minigameUI = GetMinigameUI()
             end
             if minigameUI and toggleStates.AutoFish then
                 while minigameUI and minigameUI.Parent and minigameUI.Visible and toggleStates.AutoFish do
-                    SimulateMinigameClick(); task_wait(0.1); minigameUI = GetMinigameUI()
+                    SimulateMinigameClick(); task_wait(0.01); minigameUI = GetMinigameUI()
                 end
                 task_wait(1.5)
             else
@@ -870,7 +870,7 @@ local function StartTreeAura()
                     end
                 end
             end
-            if hitCount == 0 then task_wait(0.2) end
+            if hitCount == 0 then task_wait(0.01) end
         end
     end)
 end
@@ -950,7 +950,7 @@ function StartCropAura()
                     end
                 end
             end
-            if not didAction then task_wait(0.1) end
+            if not didAction then task_wait(0.01) end
         end
     end)
 end
@@ -982,12 +982,12 @@ local function StartTeleportCrop()
                         local args = { [1] = { [getgenv().HarvestKey] = getgenv().HarvestValue, ["player"] = lp, ["model"] = block } }
                         if NetManaged and NetManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST") then NetManaged.CLIENT_HARVEST_CROP_REQUEST:InvokeServer(unpack(args)) end
                     end)
-                    harvestedCount = harvestedCount + 1; didAction = true; task_wait(0.1)
+                    harvestedCount = harvestedCount + 1; didAction = true; task_wait(0.01)
                 end
             end
             
             if harvestedCount > 0 and toggleStates.TeleportCrop then hrp.CFrame = originalCFrame; task_wait(1.5) end
-            if not didAction then task_wait(0.5) end
+            if not didAction then task_wait(0.01) end
         end
     end)
 end
@@ -1029,7 +1029,7 @@ local function StartWildStarfruitFarm()
                                 local args = { [1] = { [getgenv().HarvestKey] = getgenv().HarvestValue, ["player"] = lp, ["model"] = block } }
                                 if NetManaged and NetManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST") then NetManaged.CLIENT_HARVEST_CROP_REQUEST:InvokeServer(unpack(args)) end
                             end)
-                            task_wait(0.5); attempts = attempts + 1
+                            task_wait(0.01); attempts = attempts + 1
                         end
                         if mesh.Harvestable.Value == false then harvestedCount = harvestedCount + 1; didAction = true; task_wait(1.5) else blacklistedBushes[block] = true; task_wait(1.5) end
                     end
@@ -1037,7 +1037,7 @@ local function StartWildStarfruitFarm()
             end
             if tempPlatform.Parent then tempPlatform.Parent = nil end
             if harvestedCount > 0 and toggleStates.WildStarfruitTP then hrp.CFrame = originalCFrame; task_wait(2) end
-            if not didAction then task_wait(0.5) end
+            if not didAction then task_wait(0.01) end
         end
         if tempPlatform then tempPlatform:Destroy() end
     end)
@@ -1073,7 +1073,7 @@ local function StartSpiritFarm()
                 if not getgenv()._NotifiedNet then getgenv()._NotifiedNet = true; SwizUI:Notify("Waiting", "Equip your net!") end
                 task_wait(2); continue
             end
-            if netTool.Parent ~= char then netTool.Parent = char; task_wait(0.3) end
+            if netTool.Parent ~= char then netTool.Parent = char; task_wait(0.01) end
             
             local caughtCount = 0; local entitiesFolders = {}
             if workspace:FindFirstChild("WildernessIsland") and workspace.WildernessIsland:FindFirstChild("Entities") then table_insert(entitiesFolders, workspace.WildernessIsland.Entities) end
@@ -1105,7 +1105,7 @@ local function StartSpiritFarm()
                     end
                 end
             end
-            if caughtCount == 0 then task_wait(0.2) end
+            if caughtCount == 0 then task_wait(0.01) end
         end
     end)
 end
@@ -1164,7 +1164,7 @@ local function StartKillAura()
                     end
                 end
             end
-            if hitCount == 0 then task_wait(0.2) end
+            if hitCount == 0 then task_wait(0.01) end
         end
     end)
 end
@@ -1423,6 +1423,6 @@ task_spawn(function()
                 local tcs = game:GetService("TextChatService"); local chatWin = tcs:FindFirstChild("ChatWindowConfiguration"); if chatWin then chatWin.Enabled = true end; local chatInp = tcs:FindFirstChild("ChatInputBarConfiguration"); if chatInp then chatInp.Enabled = true end end
             end)
         end
-        task_wait(0.5)
+        task_wait(0.01)
     end
 end)
