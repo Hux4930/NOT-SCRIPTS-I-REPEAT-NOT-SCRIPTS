@@ -1,1430 +1,548 @@
-repeat
-	task.wait()
-until game:IsLoaded()
+-- Create GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HarvestTool"
+screenGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
 
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
-local UserInputService = game:GetService("UserInputService")
-local StarterGui = game:GetService("StarterGui")
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 500, 0, 500)
+mainFrame.Position = UDim2.new(0.5, -250, 0.5, -250)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
 
-local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
+-- Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+title.Text = "Harvest Tool - Auto Hash Capture"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+title.Parent = mainFrame
 
-local BLOCK_SIZE = 3
-local SCRIPT_FOLDER = "IslandsSchematicOnly"
-local GAME_FOLDER = SCRIPT_FOLDER .. "/Islands"
-local SCHEMATIC_FOLDER = GAME_FOLDER .. "/Schematics"
-local CACHE_FOLDER = GAME_FOLDER .. "/Cache"
-local PLACE_CACHE_FILE = CACHE_FOLDER .. "/block_place_cache.json"
-local REMOTE_DEBUG_FOLDER = "_ISLANDS_SCHEMATIC_ONLY"
-local PREVIEW_MODEL_NAME = "IslandsSchematicOnlyPreview"
-local SELECTION_PART_NAME = "IslandsSchematicOnlySelection"
-local START_MARKER_NAME = "IslandsSchematicOnlyStart"
-local END_MARKER_NAME = "IslandsSchematicOnlyEnd"
+-- Instructions
+local instructions = Instance.new("TextLabel")
+instructions.Size = UDim2.new(1, -20, 0, 60)
+instructions.Position = UDim2.new(0, 10, 0, 35)
+instructions.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+instructions.TextColor3 = Color3.fromRGB(255, 200, 100)
+instructions.Font = Enum.Font.SourceSans
+instructions.TextSize = 12
+instructions.Text = "INSTRUCTIONS:\n1. Simply manually harvest ONE crop\n2. Script will automatically capture the hash\n3. Then use auto harvest buttons"
+instructions.TextWrapped = true
+instructions.TextXAlignment = Enum.TextXAlignment.Left
+instructions.Parent = mainFrame
 
-local function ensureFolder(path)
-	if not isfolder(path) then
-		makefolder(path)
-	end
-end
+-- Status Label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 40)
+statusLabel.Position = UDim2.new(0, 10, 0, 100)
+statusLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.Font = Enum.Font.SourceSans
+statusLabel.TextSize = 14
+statusLabel.Text = "Status: Waiting for manual harvest..."
+statusLabel.TextWrapped = true
+statusLabel.Parent = mainFrame
 
-ensureFolder(SCRIPT_FOLDER)
-ensureFolder(GAME_FOLDER)
-ensureFolder(SCHEMATIC_FOLDER)
-ensureFolder(CACHE_FOLDER)
+-- Captured Hash Display
+local hashLabel = Instance.new("TextLabel")
+hashLabel.Size = UDim2.new(1, -20, 0, 80)
+hashLabel.Position = UDim2.new(0, 10, 0, 145)
+hashLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+hashLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+hashLabel.Font = Enum.Font.SourceSans
+hashLabel.TextSize = 11
+hashLabel.Text = "Captured Hash: None (manually harvest a crop)"
+hashLabel.TextWrapped = true
+hashLabel.TextXAlignment = Enum.TextXAlignment.Left
+hashLabel.Parent = mainFrame
 
-local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/IJHGIAJGIHJASUIJGHIUHIUHSUIAOHJAHOIBNAO/Nekohub/main/Fluent-master/main.lua"))()
+-- List Box for harvestable objects
+local listBox = Instance.new("TextBox")
+listBox.Size = UDim2.new(1, -20, 0, 120)
+listBox.Position = UDim2.new(0, 10, 0, 235)
+listBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+listBox.TextColor3 = Color3.fromRGB(200, 200, 200)
+listBox.Font = Enum.Font.SourceSans
+listBox.TextSize = 11
+listBox.Text = "Finding harvestable objects..."
+listBox.TextWrapped = true
+listBox.TextXAlignment = Enum.TextXAlignment.Left
+listBox.TextYAlignment = Enum.TextYAlignment.Top
+listBox.ClearTextOnFocus = false
+listBox.Parent = mainFrame
 
-local Window = Fluent:CreateWindow({
-	Title = "Islands Schematic Only",
-	SubTitle = "copy, save, load, move, duplicate, paste",
-	TabWidth = 160,
-	Size = UDim2.fromOffset(620, 520),
-	Acrylic = true,
-	Theme = "Dark",
-	MinimizeKey = Enum.KeyCode.RightControl
-})
+-- Button Frame
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(1, 0, 0, 80)
+buttonFrame.Position = UDim2.new(0, 0, 0, 365)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = mainFrame
 
-local Tabs = {
-	Main = Window:AddTab({ Title = "Schematic", Icon = "printer" })
-}
+-- Find All Button
+local findButton = Instance.new("TextButton")
+findButton.Size = UDim2.new(0, 140, 0, 35)
+findButton.Position = UDim2.new(0, 10, 0, 5)
+findButton.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+findButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+findButton.Font = Enum.Font.SourceSansBold
+findButton.TextSize = 14
+findButton.Text = "Find All"
+findButton.Parent = buttonFrame
 
-local Options = Fluent.Options
+-- Harvest Closest Button
+local harvestClosestButton = Instance.new("TextButton")
+harvestClosestButton.Size = UDim2.new(0, 150, 0, 35)
+harvestClosestButton.Position = UDim2.new(0, 160, 0, 5)
+harvestClosestButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+harvestClosestButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+harvestClosestButton.Font = Enum.Font.SourceSansBold
+harvestClosestButton.TextSize = 14
+harvestClosestButton.Text = "Harvest Closest"
+harvestClosestButton.Parent = buttonFrame
 
-local function notify(title, text, duration)
-	duration = duration or 4
-	pcall(function()
-		Fluent:Notify({
-			Title = title,
-			Content = text,
-			Duration = duration
-		})
-	end)
+-- Harvest All Button
+local harvestAllButton = Instance.new("TextButton")
+harvestAllButton.Size = UDim2.new(0, 150, 0, 35)
+harvestAllButton.Position = UDim2.new(0, 320, 0, 5)
+harvestAllButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+harvestAllButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+harvestAllButton.Font = Enum.Font.SourceSansBold
+harvestAllButton.TextSize = 14
+harvestAllButton.Text = "Harvest All"
+harvestAllButton.Parent = buttonFrame
 
-	pcall(function()
-		StarterGui:SetCore("SendNotification", {
-			Title = title,
-			Text = text,
-			Duration = duration
-		})
-	end)
+-- Reset Capture Button
+local resetButton = Instance.new("TextButton")
+resetButton.Size = UDim2.new(0, 200, 0, 35)
+resetButton.Position = UDim2.new(0, 10, 0, 45)
+resetButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+resetButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+resetButton.Font = Enum.Font.SourceSansBold
+resetButton.TextSize = 14
+resetButton.Text = "Reset Captured Hash"
+resetButton.Parent = buttonFrame
 
-	print(string.format("[%s] %s", tostring(title), tostring(text)))
-end
+-- Variables
+local harvestableObjects = {}
+local capturedHash = nil
+local captureInstalled = false
+local harvestRemote = nil
 
-local function extractFileName(path)
-	return tostring(path):match("[^/\\]+$") or tostring(path)
-end
-
-local function ensureJsonExtension(name)
-	name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
-	if name == "" then
-		name = "Template"
-	end
-	if not name:lower():match("%.json$") then
-		name = name .. ".json"
-	end
-	return name
-end
-
-local function getClipboardText()
-	if type(getclipboard) == "function" then
-		return getclipboard()
-	end
-	if type(readclipboard) == "function" then
-		return readclipboard()
-	end
-	return nil
-end
-
-local function copyToClipboard(text)
-	if type(setclipboard) == "function" then
-		setclipboard(text)
-		return true
-	end
-	return false
-end
-
-local function getRemoteDebugFolder()
-	local folder = game:FindFirstChild(REMOTE_DEBUG_FOLDER)
-	if folder then
-		return folder
-	end
-
-	folder = Instance.new("Folder")
-	folder.Name = REMOTE_DEBUG_FOLDER
-	folder.Parent = game
-	return folder
-end
-
-local function setRemoteDebugValue(name, value)
-	local folder = getRemoteDebugFolder()
-	local entry = folder:FindFirstChild(name)
-	if not entry then
-		entry = Instance.new("StringValue")
-		entry.Name = name
-		entry.Parent = folder
-	end
-	entry.Value = tostring(value or "")
-end
-
+-- Get NetManaged
 local function getNetManaged()
-	local ok, result = pcall(function()
-		return ReplicatedStorage
-			:WaitForChild("rbxts_include")
-			:WaitForChild("node_modules")
-			:WaitForChild("@rbxts")
-			:WaitForChild("net")
-			:WaitForChild("out")
-			:WaitForChild("_NetManaged")
-	end)
-
-	if ok then
-		return result
-	end
-
-	return nil
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local ok, result = pcall(function()
+        return ReplicatedStorage
+            :WaitForChild("rbxts_include")
+            :WaitForChild("node_modules")
+            :WaitForChild("@rbxts")
+            :WaitForChild("net")
+            :WaitForChild("out")
+            :WaitForChild("_NetManaged")
+    end)
+    
+    if ok then return result end
+    return nil
 end
 
-local cloneFolder = Workspace:FindFirstChild(PREVIEW_MODEL_NAME)
-if not cloneFolder then
-	cloneFolder = Instance.new("Model")
-	cloneFolder.Name = PREVIEW_MODEL_NAME
-	cloneFolder.Parent = Workspace
+-- Try to capture hash from payload
+local function tryCaptureHarvestHashFromPayload(payload, sourceLabel)
+    if type(payload) ~= "table" then
+        return false
+    end
+    
+    -- Check for the dZnpyRtxna field (the hash field)
+    if payload["dZnpyRtxna"] and type(payload["dZnpyRtxna"]) == "string" then
+        capturedHash = payload["dZnpyRtxna"]
+        
+        -- Display hash with escaped characters
+        local displayHash = capturedHash:gsub("[%z%c]", function(c)
+            return string.format("\\x%02X", string.byte(c))
+        end)
+        hashLabel.Text = "Captured Hash: " .. displayHash:sub(1, 100)
+        statusLabel.Text = "Status: ✓ Hash captured! Now you can auto harvest."
+        
+        print("=== HASH CAPTURED ===")
+        print("Hash:", capturedHash)
+        print("Source:", sourceLabel)
+        print("=====================")
+        
+        return true
+    end
+    
+    return false
 end
 
-local blocksFolder = ReplicatedStorage:WaitForChild("Blocks")
-local netManaged = getNetManaged()
-
-local currentFileName = "Template.json"
-local importCodeValue = ""
-local lastSavedJson = nil
-local buildCollision = true
-local moveStepBlocks = 1
-local duplicateCount = 1
-local duplicateOffsetX = 0
-local duplicateOffsetY = 0
-local duplicateOffsetZ = 0
-local pasteInProgress = false
-
-local placementHashName = nil
-local placementHashValue = nil
-local placementCaptureInstalled = false
-
-local selectionStartBlock = nil
-local selectionEndBlock = nil
-local selectionPickMode = nil
-local selectionPart = nil
-local startMarker = nil
-local endMarker = nil
-
-local RemoteSection = Tabs.Main:AddSection("Remote")
-local SelectionSection = Tabs.Main:AddSection("Selection")
-local StorageSection = Tabs.Main:AddSection("Storage")
-local PreviewSection = Tabs.Main:AddSection("Preview")
-local PasteSection = Tabs.Main:AddSection("Paste")
-
-local RemoteStatus = RemoteSection:AddParagraph({
-	Title = "Placement Remote",
-	Content = "not resolved yet"
-})
-
-local SelectionStatus = SelectionSection:AddParagraph({
-	Title = "Selection",
-	Content = "pick a start and end block"
-})
-
-local PreviewStatus = PreviewSection:AddParagraph({
-	Title = "Preview",
-	Content = "0 preview blocks"
-})
-
-local function isThreeBlock(part)
-	return part
-		and part:IsA("BasePart")
-		and math.abs(part.Size.X - BLOCK_SIZE) <= 0.1
-		and math.abs(part.Size.Y - BLOCK_SIZE) <= 0.1
-		and math.abs(part.Size.Z - BLOCK_SIZE) <= 0.1
+-- Try to capture from args
+local function tryCaptureHarvestHashFromArgs(args, sourceLabel)
+    for _, arg in ipairs(args) do
+        if tryCaptureHarvestHashFromPayload(arg, sourceLabel) then
+            return true
+        end
+    end
+    return false
 end
 
-local function isIslandBlockPart(part)
-	return isThreeBlock(part)
-		and (
-			(part.Parent and part.Parent.Name == "Blocks")
-			or part:FindFirstChild("Health") ~= nil
-		)
+-- Install the harvest capture hook
+local function installHarvestCaptureHook()
+    if captureInstalled then
+        return true
+    end
+    
+    -- Check if executor supports required functions
+    if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" or type(newcclosure) ~= "function" then
+        statusLabel.Text = "Status: Executor doesn't support harvest capture!"
+        return false, "Executor missing required functions"
+    end
+    
+    local netManaged = getNetManaged()
+    if not netManaged then
+        statusLabel.Text = "Status: Cannot find NetManaged!"
+        return false, "NetManaged not found"
+    end
+    
+    harvestRemote = netManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST")
+    if not harvestRemote then
+        statusLabel.Text = "Status: Cannot find harvest remote!"
+        return false, "Harvest remote not found"
+    end
+    
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local args = { ... }
+        local method = getnamecallmethod()
+        
+        if method == "InvokeServer" and typeof(self) == "Instance" and self.Name == "CLIENT_HARVEST_CROP_REQUEST" then
+            -- Check if this is a game call (not from our script)
+            local isGameCall = true
+            if type(checkcaller) == "function" then
+                isGameCall = not checkcaller()
+            end
+            
+            if isGameCall then
+                local captured = tryCaptureHarvestHashFromArgs(args, "manual harvest")
+                if captured then
+                    -- Play a little visual feedback
+                    task.spawn(function()
+                        statusLabel.Text = "Status: Hash captured from manual harvest!"
+                        hashLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                        task.wait(2)
+                        hashLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+                    end)
+                end
+            end
+        end
+        
+        return oldNamecall(self, ...)
+    end))
+    
+    captureInstalled = true
+    statusLabel.Text = "Status: Capture hook installed! Manually harvest a crop."
+    return true
 end
 
-local function normalizeClickedBlock(target)
-	if not target then
-		return nil
-	end
-
-	if target.Name == "Top" and target.Parent and target.Parent:IsA("BasePart") then
-		target = target.Parent
-	end
-
-	if isIslandBlockPart(target) then
-		return target
-	end
-
-	if target.Parent and target.Parent:IsA("BasePart") and isIslandBlockPart(target.Parent) then
-		return target.Parent
-	end
-
-	return nil
+-- Calculate distance
+local function getDistance(pos1, pos2)
+    return (pos1 - pos2).Magnitude
 end
 
-local function createMarker(name, color)
-	local marker = Workspace:FindFirstChild(name)
-	if not marker then
-		marker = Instance.new("Part")
-		marker.Name = name
-		marker.Size = Vector3.new(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
-		marker.Anchored = true
-		marker.CanCollide = false
-		marker.CastShadow = false
-		marker.Material = Enum.Material.Neon
-		marker.Transparency = 0.35
-		marker.Parent = Workspace
-	end
-
-	marker.Color = color
-	return marker
+-- Find all harvestable objects
+local function findHarvestableObjects()
+    statusLabel.Text = "Status: Scanning for harvestable objects..."
+    harvestableObjects = {}
+    
+    local player = game:GetService("Players").LocalPlayer
+    local character = player.Character
+    local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
+    
+    local Workspace = game:GetService("Workspace")
+    
+    -- Scan islands
+    for _, island in pairs(Workspace.Islands:GetChildren()) do
+        local blocks = island:FindFirstChild("Blocks")
+        if blocks then
+            for blockName, block in pairs(blocks:GetChildren()) do
+                -- Check various harvestable types
+                local isHarvestable = false
+                local harvestType = "unknown"
+                
+                -- Check by name
+                local lowerName = blockName:lower()
+                if lowerName:find("berry") or lowerName:find("bush") then
+                    isHarvestable = true
+                    harvestType = "berry"
+                elseif lowerName:find("crop") or lowerName:find("wheat") or lowerName:find("carrot") or lowerName:find("potato") then
+                    isHarvestable = true
+                    harvestType = "crop"
+                elseif lowerName:find("tree") or lowerName:find("wood") then
+                    isHarvestable = true
+                    harvestType = "tree"
+                end
+                
+                -- Also check if it has Health (indicates harvestable block)
+                if not isHarvestable and block:FindFirstChild("Health") then
+                    isHarvestable = true
+                    harvestType = "block"
+                end
+                
+                if isHarvestable then
+                    local position = block:IsA("BasePart") and block.Position or 
+                                   (block:FindFirstChild("Position") and block.Position.Position) or
+                                   Vector3.new(0, 0, 0)
+                    
+                    local distance = getDistance(playerPos, position)
+                    
+                    table.insert(harvestableObjects, {
+                        name = blockName,
+                        model = block,
+                        island = island.Name,
+                        position = position,
+                        distance = distance,
+                        type = harvestType
+                    })
+                end
+            end
+        end
+    end
+    
+    -- Sort by distance (closest first)
+    table.sort(harvestableObjects, function(a, b) 
+        return a.distance < b.distance 
+    end)
+    
+    -- Update display
+    local listText = "Found " .. #harvestableObjects .. " objects (closest first):\n\n"
+    for i, obj in ipairs(harvestableObjects) do
+        listText = listText .. string.format("%d. %s [%s] - %.1f studs\n", i, obj.name, obj.type, obj.distance)
+        if i >= 25 then
+            listText = listText .. "\n... and " .. (#harvestableObjects - 25) .. " more"
+            break
+        end
+    end
+    
+    listBox.Text = listText
+    statusLabel.Text = "Status: Found " .. #harvestableObjects .. " harvestable objects"
+    
+    if #harvestableObjects == 0 then
+        listBox.Text = "No harvestable objects found!\n\nMake sure you're near crops/berry bushes."
+    end
 end
 
-local function destroySelectionVisuals()
-	if selectionPart then
-		selectionPart:Destroy()
-		selectionPart = nil
-	end
-
-	if startMarker then
-		startMarker:Destroy()
-		startMarker = nil
-	end
-
-	if endMarker then
-		endMarker:Destroy()
-		endMarker = nil
-	end
+-- Harvest a specific object
+local function harvestObject(obj)
+    if not obj or not obj.model then
+        statusLabel.Text = "Status: Invalid object!"
+        return false
+    end
+    
+    if not capturedHash then
+        statusLabel.Text = "Status: No hash captured! Manually harvest a crop first."
+        return false
+    end
+    
+    local player = game:GetService("Players").LocalPlayer
+    local netManaged = getNetManaged()
+    
+    if not netManaged then
+        statusLabel.Text = "Status: Cannot find NetManaged!"
+        return false
+    end
+    
+    local remote = netManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST")
+    if not remote then
+        statusLabel.Text = "Status: Cannot find harvest remote!"
+        return false
+    end
+    
+    statusLabel.Text = "Status: Harvesting " .. obj.name
+    
+    local success, result = pcall(function()
+        return remote:InvokeServer({
+            ["dZnpyRtxna"] = capturedHash,
+            ["player"] = player,
+            ["model"] = obj.model,
+        })
+    end)
+    
+    if success then
+        statusLabel.Text = "Status: ✓ Harvested " .. obj.name
+        print("Harvested:", obj.name, "Distance:", obj.distance)
+        return true
+    else
+        statusLabel.Text = "Status: ✗ Failed to harvest " .. obj.name
+        warn("Harvest failed:", result)
+        return false
+    end
 end
 
-local function countPreviewBlocks()
-	local count = 0
-	for _, child in ipairs(cloneFolder:GetChildren()) do
-		if child:IsA("BasePart") and child.Name ~= "PrimaryPart" then
-			count = count + 1
-		end
-	end
-	return count
+-- Harvest closest object (already sorted by distance)
+local function harvestClosest()
+    if #harvestableObjects == 0 then
+        findHarvestableObjects()
+    end
+    
+    if #harvestableObjects == 0 then
+        statusLabel.Text = "Status: No objects to harvest!"
+        return
+    end
+    
+    if not capturedHash then
+        statusLabel.Text = "Status: No hash! Manually harvest a crop first."
+        return
+    end
+    
+    -- Update distances to current position
+    local player = game:GetService("Players").LocalPlayer
+    local character = player.Character
+    local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
+    
+    for _, obj in ipairs(harvestableObjects) do
+        if obj.model and obj.model:IsDescendantOf(game:GetService("Workspace")) then
+            obj.distance = getDistance(playerPos, obj.position)
+        end
+    end
+    
+    -- Re-sort by current distance
+    table.sort(harvestableObjects, function(a, b) 
+        return a.distance < b.distance 
+    end)
+    
+    local closest = harvestableObjects[1]
+    if closest then
+        harvestObject(closest)
+    else
+        statusLabel.Text = "Status: No valid objects nearby!"
+    end
 end
 
-local function updatePreviewStatus()
-	PreviewStatus:SetDesc(string.format("%d preview blocks", countPreviewBlocks()))
+-- Harvest all objects (closest first with 0.01s wait)
+local function harvestAll()
+    if #harvestableObjects == 0 then
+        findHarvestableObjects()
+    end
+    
+    if #harvestableObjects == 0 then
+        statusLabel.Text = "Status: No objects to harvest!"
+        return
+    end
+    
+    if not capturedHash then
+        statusLabel.Text = "Status: No hash! Manually harvest a crop first."
+        return
+    end
+    
+    -- Update all distances and sort
+    local player = game:GetService("Players").LocalPlayer
+    local character = player.Character
+    local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
+    
+    for _, obj in ipairs(harvestableObjects) do
+        if obj.model and obj.model:IsDescendantOf(game:GetService("Workspace")) then
+            obj.distance = getDistance(playerPos, obj.position)
+        else
+            obj.distance = math.huge
+        end
+    end
+    
+    table.sort(harvestableObjects, function(a, b) 
+        return a.distance < b.distance 
+    end)
+    
+    statusLabel.Text = "Status: Harvesting all " .. #harvestableObjects .. " objects (closest first)..."
+    
+    local successCount = 0
+    for i, obj in ipairs(harvestableObjects) do
+        if obj.model and obj.model:IsDescendantOf(game:GetService("Workspace")) and obj.distance ~= math.huge then
+            if harvestObject(obj) then
+                successCount = successCount + 1
+            end
+            task.wait(0.01) -- 0.01 second wait between harvests
+        end
+    end
+    
+    statusLabel.Text = string.format("Status: Complete! Harvested %d/%d objects", successCount, #harvestableObjects)
+    
+    -- Refresh the list to remove harvested objects (they might still exist or be gone)
+    task.wait(1)
+    findHarvestableObjects()
 end
 
-local function updateSelectionStatus()
-	if not selectionStartBlock or not selectionEndBlock then
-		SelectionStatus:SetDesc("pick a start and end block")
-		return
-	end
-
-	local minX = math.min(selectionStartBlock.Position.X, selectionEndBlock.Position.X)
-	local minY = math.min(selectionStartBlock.Position.Y, selectionEndBlock.Position.Y)
-	local minZ = math.min(selectionStartBlock.Position.Z, selectionEndBlock.Position.Z)
-	local maxX = math.max(selectionStartBlock.Position.X, selectionEndBlock.Position.X)
-	local maxY = math.max(selectionStartBlock.Position.Y, selectionEndBlock.Position.Y)
-	local maxZ = math.max(selectionStartBlock.Position.Z, selectionEndBlock.Position.Z)
-
-	local sizeX = ((maxX - minX) / BLOCK_SIZE) + 1
-	local sizeY = ((maxY - minY) / BLOCK_SIZE) + 1
-	local sizeZ = ((maxZ - minZ) / BLOCK_SIZE) + 1
-	local totalCells = sizeX * sizeY * sizeZ
-
-	SelectionStatus:SetDesc(string.format("%dx%dx%d selection (%d grid cells)", sizeX, sizeY, sizeZ, totalCells))
+-- Reset captured hash
+local function resetCapturedHash()
+    capturedHash = nil
+    hashLabel.Text = "Captured Hash: None (manually harvest a crop)"
+    statusLabel.Text = "Status: Hash reset. Manually harvest a crop to capture new hash."
+    print("Hash reset - waiting for manual harvest")
 end
 
-local function rebuildSelectionPart()
-	if not selectionStartBlock or not selectionEndBlock then
-		return
-	end
-
-	local minX = math.min(selectionStartBlock.Position.X, selectionEndBlock.Position.X)
-	local minY = math.min(selectionStartBlock.Position.Y, selectionEndBlock.Position.Y)
-	local minZ = math.min(selectionStartBlock.Position.Z, selectionEndBlock.Position.Z)
-	local maxX = math.max(selectionStartBlock.Position.X, selectionEndBlock.Position.X)
-	local maxY = math.max(selectionStartBlock.Position.Y, selectionEndBlock.Position.Y)
-	local maxZ = math.max(selectionStartBlock.Position.Z, selectionEndBlock.Position.Z)
-
-	local size = Vector3.new(
-		(maxX - minX) + BLOCK_SIZE,
-		(maxY - minY) + BLOCK_SIZE,
-		(maxZ - minZ) + BLOCK_SIZE
-	)
-
-	local center = Vector3.new(
-		(minX + maxX) / 2,
-		(minY + maxY) / 2,
-		(minZ + maxZ) / 2
-	)
-
-	if not selectionPart then
-		selectionPart = Instance.new("Part")
-		selectionPart.Name = SELECTION_PART_NAME
-		selectionPart.Anchored = true
-		selectionPart.CanCollide = false
-		selectionPart.CastShadow = false
-		selectionPart.Material = Enum.Material.Neon
-		selectionPart.Color = Color3.fromRGB(75, 170, 255)
-		selectionPart.Transparency = 0.8
-		selectionPart.Parent = Workspace
-
-		local box = Instance.new("SelectionBox")
-		box.LineThickness = 0.05
-		box.Color3 = Color3.fromRGB(75, 170, 255)
-		box.SurfaceTransparency = 1
-		box.Adornee = selectionPart
-		box.Parent = selectionPart
-	end
-
-	selectionPart.Size = size
-	selectionPart.CFrame = CFrame.new(center)
-	updateSelectionStatus()
-end
-
-local function isPreviewBlock(block)
-	return block
-		and block.Parent == cloneFolder
-		and block:IsA("BasePart")
-		and block.Name ~= "PrimaryPart"
-end
-
-local function clearPreview()
-	for _, child in ipairs(cloneFolder:GetChildren()) do
-		child:Destroy()
-	end
-
-	cloneFolder.PrimaryPart = nil
-	updatePreviewStatus()
-end
-
-local function getPreviewBlocks()
-	local blocks = {}
-
-	for _, child in ipairs(cloneFolder:GetChildren()) do
-		if isPreviewBlock(child) then
-			table.insert(blocks, child)
-		end
-	end
-
-	return blocks
-end
-
-local function ensurePreviewPrimaryPart()
-	if cloneFolder.PrimaryPart and cloneFolder.PrimaryPart.Parent == cloneFolder then
-		return cloneFolder.PrimaryPart
-	end
-
-	for _, child in ipairs(cloneFolder:GetChildren()) do
-		if isPreviewBlock(child) then
-			cloneFolder.PrimaryPart = child
-			return child
-		end
-	end
-
-	return nil
-end
-
-local function buildLocalOffset(xBlocks, yBlocks, zBlocks)
-	local xStuds = (tonumber(xBlocks) or 0) * BLOCK_SIZE
-	local yStuds = (tonumber(yBlocks) or 0) * BLOCK_SIZE
-	local zStuds = (tonumber(zBlocks) or 0) * BLOCK_SIZE
-
-	local primary = ensurePreviewPrimaryPart()
-	if not primary then
-		return Vector3.new(xStuds, yStuds, zStuds)
-	end
-
-	return (primary.CFrame.RightVector * xStuds)
-		+ (primary.CFrame.UpVector * yStuds)
-		+ (primary.CFrame.LookVector * zStuds)
-end
-
-local function movePreviewByBlocks(xBlocks, yBlocks, zBlocks)
-	local primary = ensurePreviewPrimaryPart()
-	if not primary then
-		notify("Preview", "Load or copy a preview first.", 3)
-		return false
-	end
-
-	cloneFolder:SetPrimaryPartCFrame(primary.CFrame + buildLocalOffset(xBlocks, yBlocks, zBlocks))
-	return true
-end
-
-local function getSelectionBlocks()
-	if not selectionPart then
-		return nil, "Pick a start and end block first."
-	end
-
-	local blocks = {}
-	for _, part in pairs(Workspace:GetPartsInPart(selectionPart)) do
-		if part.Parent and part.Parent.Name == "Blocks" then
-			table.insert(blocks, part)
-		end
-	end
-
-	if #blocks == 0 then
-		return nil, "No island blocks were found inside the selection."
-	end
-
-	return blocks
-end
-
-local function getSelectionOrigin(blocks)
-	local minX = math.huge
-	local minY = math.huge
-	local minZ = math.huge
-
-	for _, block in ipairs(blocks) do
-		local pos = block.Position
-		if pos.X < minX then
-			minX = pos.X
-		end
-		if pos.Y < minY then
-			minY = pos.Y
-		end
-		if pos.Z < minZ then
-			minZ = pos.Z
-		end
-	end
-
-	return Vector3.new(minX, minY, minZ)
-end
-
-local function buildSchematicData(blocks)
-	local origin = getSelectionOrigin(blocks)
-	local originCFrame = CFrame.new(origin)
-	local data = {
-		FormatVersion = 2,
-		BlockSize = BLOCK_SIZE,
-		Origin = { origin.X, origin.Y, origin.Z },
-		Blocks = {}
-	}
-
-	table.sort(blocks, function(a, b)
-		if a.Position.Y ~= b.Position.Y then
-			return a.Position.Y < b.Position.Y
-		end
-		if a.Position.X ~= b.Position.X then
-			return a.Position.X < b.Position.X
-		end
-		if a.Position.Z ~= b.Position.Z then
-			return a.Position.Z < b.Position.Z
-		end
-		return a.Name < b.Name
-	end)
-
-	for _, block in ipairs(blocks) do
-		local relative = originCFrame:ToObjectSpace(block.CFrame)
-		local blockName = block.Name
-
-		if not data.Blocks[blockName] then
-			data.Blocks[blockName] = {}
-		end
-
-		table.insert(data.Blocks[blockName], {
-			C = { relative.components(relative) }
-		})
-	end
-
-	return data
-end
-
-local function stripComments(text)
-	if type(text) ~= "string" then
-		return nil
-	end
-
-	return text:gsub("%-%-.-\n", "\n")
-end
-
-local function decodeSchematicText(text)
-	if type(text) ~= "string" or text == "" then
-		return nil, "No schematic code was provided."
-	end
-
-	local cleaned = stripComments(text)
-	local ok, decoded = pcall(function()
-		return HttpService:JSONDecode(cleaned)
-	end)
-
-	if not ok then
-		return nil, tostring(decoded)
-	end
-
-	return decoded, cleaned
-end
-
-local function normalizePreviewBlockName(name)
-	if name == "dirt" then
-		return "soil"
-	end
-	return name
-end
-
-local function normalizePlaceBlockName(name)
-	if name == "soil" then
-		return "grass"
-	end
-	return name
-end
-
-local function spawnPreviewBlock(blockName, worldCFrame)
-	local previewName = normalizePreviewBlockName(blockName)
-	local blockFolder = blocksFolder:FindFirstChild(previewName)
-	if not blockFolder then
-		warn("Preview block folder missing:", previewName)
-		return nil
-	end
-
-	local root = blockFolder:FindFirstChild("Root")
-	if not root then
-		warn("Preview root missing:", previewName)
-		return nil
-	end
-
-	local previewBlock = root:Clone()
-	previewBlock.Name = previewName
-	previewBlock.Anchored = true
-	previewBlock.CanCollide = buildCollision
-	previewBlock.Transparency = 0.5
-	previewBlock.Locked = false
-	previewBlock.Parent = cloneFolder
-	previewBlock.CFrame = worldCFrame
-	return previewBlock
-end
-
-local function loadDecodedSchematic(decoded)
-	if not decoded then
-		return false, "No decoded schematic data."
-	end
-
-	clearPreview()
-
-	local placed = 0
-
-	local decodedBlocks = decoded.Blocks or decoded.blocks
-	if decodedBlocks then
-		local origin = decoded.Origin or decoded.origin or { 0, 0, 0 }
-		local originCFrame = CFrame.new(
-			tonumber(origin[1]) or 0,
-			tonumber(origin[2]) or 0,
-			tonumber(origin[3]) or 0
-		)
-
-		for blockName, blockList in pairs(decodedBlocks) do
-			for _, block in ipairs(blockList) do
-				if block.C then
-					local relative = CFrame.new(unpack(block.C))
-					local world = originCFrame:ToWorldSpace(relative)
-					if spawnPreviewBlock(blockName, world) then
-						placed = placed + 1
-					end
-				end
-			end
-		end
-	else
-		for blockName, blockList in pairs(decoded) do
-			for _, block in ipairs(blockList) do
-				local x = tonumber(block[1]) or 0
-				local y = tonumber(block[2]) or 0
-				local z = tonumber(block[3]) or 0
-				if spawnPreviewBlock(blockName, CFrame.new(x, y, z)) then
-					placed = placed + 1
-				end
-			end
-		end
-	end
-
-	updatePreviewStatus()
-
-	if placed == 0 then
-		return false, "No preview blocks could be loaded."
-	end
-
-	return true, placed
-end
-
-local function loadSchematicText(text)
-	local decoded, cleanedOrError = decodeSchematicText(text)
-	if not decoded then
-		return false, cleanedOrError
-	end
-
-	lastSavedJson = cleanedOrError
-	return loadDecodedSchematic(decoded)
-end
-
-local function getSchematicPath(fileName)
-	return SCHEMATIC_FOLDER .. "/" .. ensureJsonExtension(fileName)
-end
-
-local function getSchematicFileNames()
-	local names = {}
-	for _, filePath in ipairs(listfiles(SCHEMATIC_FOLDER)) do
-		if isfile(filePath) then
-			table.insert(names, extractFileName(filePath))
-		end
-	end
-
-	table.sort(names)
-
-	if #names == 0 then
-		table.insert(names, currentFileName)
-	end
-
-	return names
-end
-
-local function getBlockControllerScript()
-	local playerScripts = LocalPlayer:FindFirstChild("PlayerScripts")
-	local ts = playerScripts and playerScripts:FindFirstChild("TS")
-	local flame = ts and ts:FindFirstChild("flame")
-	local controllers = flame and flame:FindFirstChild("controllers")
-	local blockFolder = controllers and controllers:FindFirstChild("block")
-	return blockFolder and blockFolder:FindFirstChild("block-controller")
-end
-
-local updateRemoteStatus
-
-local function savePlacementCache(hashName, hashValue)
-	local encoded = HttpService:JSONEncode({
-		placeVersion = game.PlaceVersion,
-		hashName = hashName,
-		hashValue = hashValue
-	})
-
-	writefile(PLACE_CACHE_FILE, encoded)
-end
-
-local function loadPlacementCache()
-	if not isfile(PLACE_CACHE_FILE) then
-		return nil
-	end
-
-	local ok, decoded = pcall(function()
-		return HttpService:JSONDecode(readfile(PLACE_CACHE_FILE))
-	end)
-
-	if not ok or type(decoded) ~= "table" then
-		return nil
-	end
-
-	if tonumber(decoded.placeVersion) ~= game.PlaceVersion then
-		return nil
-	end
-
-	if type(decoded.hashName) ~= "string" or type(decoded.hashValue) ~= "string" then
-		return nil
-	end
-
-	return decoded.hashName, decoded.hashValue
-end
-
-local function setActivePlacementHash(hashName, hashValue, sourceLabel)
-	if type(hashName) ~= "string" or hashName == "" or type(hashValue) ~= "string" or hashValue == "" then
-		return false
-	end
-
-	placementHashName = hashName
-	placementHashValue = hashValue
-	savePlacementCache(placementHashName, placementHashValue)
-
-	setRemoteDebugValue("BlockPlaceRemote", "CLIENT_BLOCK_PLACE_REQUEST")
-	setRemoteDebugValue("BlockPlaceHashData", placementHashName)
-	setRemoteDebugValue("BlockPlaceHash", placementHashValue)
-	updateRemoteStatus("placement hash ready (" .. tostring(sourceLabel or "unknown") .. ")")
-	return true
-end
-
-local function tryCapturePlacementHashFromPayload(payload, sourceLabel)
-	if type(payload) ~= "table" then
-		return false
-	end
-
-	local hasCFrame = payload.cframe ~= nil
-	local hasBlockType = payload.blockType ~= nil
-	if not hasCFrame or not hasBlockType then
-		return false
-	end
-
-	for key, value in pairs(payload) do
-		if type(key) == "string" and type(value) == "string" then
-			if key ~= "blockType" and key ~= "cframe" and key ~= "upperBlock" then
-				if setActivePlacementHash(key, value, sourceLabel) then
-					task.spawn(function()
-						notify("Remote", "Captured placement hash from a manual block place.", 4)
-					end)
-					return true
-				end
-			end
-		end
-	end
-
-	return false
-end
-
-local function tryCapturePlacementHashFromArgs(args, sourceLabel)
-	for _, arg in ipairs(args) do
-		if tryCapturePlacementHashFromPayload(arg, sourceLabel) then
-			return true
-		end
-	end
-
-	return false
-end
-
-local function installPlacementCaptureHook()
-	if placementCaptureInstalled then
-		return true
-	end
-
-	if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" or type(newcclosure) ~= "function" then
-		return false, "Your executor cannot hook __namecall for manual placement capture."
-	end
-
-	local oldNamecall
-	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-		local args = { ... }
-		local method = getnamecallmethod()
-
-		if method == "InvokeServer"
-			and typeof(self) == "Instance"
-			and self.Name == "CLIENT_BLOCK_PLACE_REQUEST"
-		then
-			local isGameCall = true
-			if type(checkcaller) == "function" then
-				isGameCall = not checkcaller()
-			end
-
-			if isGameCall then
-				tryCapturePlacementHashFromArgs(args, "manual placement")
-			end
-		end
-
-		return oldNamecall(self, ...)
-	end))
-
-	placementCaptureInstalled = true
-	return true
-end
-
-local function discoverPlacementHash()
-	if type(getgc) ~= "function" or type(getconstants) ~= "function" or type(getfenv) ~= "function" then
-		return nil, "Your executor is missing getgc/getconstants/getfenv."
-	end
-
-	local blockController = getBlockControllerScript()
-	if not blockController then
-		return nil, "Could not find the block-controller script."
-	end
-
-	for _, fn in pairs(getgc(true)) do
-		if type(fn) == "function" then
-			local env = getfenv(fn)
-			if env and env.script == blockController then
-				local ok, constants = pcall(getconstants, fn)
-				if ok and type(constants) == "table" then
-					local left = constants[23]
-					local rightA = constants[25]
-					local rightB = constants[26]
-
-					if type(left) == "string" and type(rightA) == "string" and type(rightB) == "string" then
-						return left, rightA .. rightB
-					end
-				end
-			end
-		end
-	end
-
-	return nil, "Could not discover the placement hash."
-end
-
-updateRemoteStatus = function(text)
-	RemoteStatus:SetDesc(tostring(text))
-end
-
-local function resolvePlacementHash(forceRefresh)
-	if placementHashName and placementHashValue and not forceRefresh then
-		return true
-	end
-
-	if not forceRefresh then
-		local cachedName, cachedValue = loadPlacementCache()
-		if cachedName and cachedValue then
-			setActivePlacementHash(cachedName, cachedValue, "cache")
-			return true
-		end
-	end
-
-	local hashName, hashValueOrError = discoverPlacementHash()
-	if not hashName then
-		updateRemoteStatus(hashValueOrError)
-		return false, hashValueOrError
-	end
-
-	setActivePlacementHash(hashName, hashValueOrError, "auto scan")
-	return true
-end
-
-local function placeBlockRequest(blockCFrame, blockName)
-	if not netManaged then
-		return false, "NetManaged could not be found."
-	end
-
-	if not placementHashName or not placementHashValue then
-		local ok, err = resolvePlacementHash(false)
-		if not ok then
-			return false, err
-		end
-	end
-
-	local placeRemote = netManaged:FindFirstChild("CLIENT_BLOCK_PLACE_REQUEST")
-	if not placeRemote then
-		return false, "CLIENT_BLOCK_PLACE_REQUEST was not found."
-	end
-
-	local args = {
-		upperBlock = false,
-		cframe = blockCFrame,
-		blockType = normalizePlaceBlockName(blockName)
-	}
-	args[placementHashName] = placementHashValue
-
-	return pcall(function()
-		placeRemote:InvokeServer(args)
-	end)
-end
-
-Mouse.Button1Down:Connect(function()
-	if not selectionPickMode then
-		return
-	end
-
-	local clickedBlock = normalizeClickedBlock(Mouse.Target)
-	if not clickedBlock then
-		notify("Selection", "Click a 3x3 island block.", 3)
-		return
-	end
-
-	if selectionPickMode == "start" then
-		selectionStartBlock = clickedBlock
-		startMarker = createMarker(START_MARKER_NAME, Color3.fromRGB(70, 170, 255))
-		startMarker.CFrame = clickedBlock.CFrame
-		notify("Selection", "Start corner picked.", 2)
-	elseif selectionPickMode == "end" then
-		selectionEndBlock = clickedBlock
-		endMarker = createMarker(END_MARKER_NAME, Color3.fromRGB(255, 95, 95))
-		endMarker.CFrame = clickedBlock.CFrame
-		notify("Selection", "End corner picked.", 2)
-	end
-
-	selectionPickMode = nil
-
-	if selectionStartBlock and selectionEndBlock then
-		rebuildSelectionPart()
-	end
-
-	updateSelectionStatus()
+-- Button connections
+findButton.MouseButton1Click:Connect(function()
+    task.spawn(findHarvestableObjects)
 end)
 
-RemoteSection:AddButton({
-	Title = "Resolve Placement Remote",
-	Description = "",
-	Callback = function()
-		local hookOk, hookErr = installPlacementCaptureHook()
-		if not hookOk then
-			notify("Remote", tostring(hookErr), 5)
-		end
-
-		local ok, err = resolvePlacementHash(true)
-		if ok then
-			notify("Remote", "Placement hash refreshed successfully.", 3)
-		else
-			notify("Remote", tostring(err) .. " Place one block manually to capture the hash.", 6)
-			updateRemoteStatus("place one block manually to capture the placement hash")
-		end
-	end
-})
-
-SelectionSection:AddButton({
-	Title = "Pick Start Corner",
-	Description = "",
-	Callback = function()
-		selectionPickMode = "start"
-		notify("Selection", "Click the first corner block.", 3)
-	end
-})
-
-SelectionSection:AddButton({
-	Title = "Pick End Corner",
-	Description = "",
-	Callback = function()
-		selectionPickMode = "end"
-		notify("Selection", "Click the opposite corner block.", 3)
-	end
-})
-
-SelectionSection:AddButton({
-	Title = "Clear Selection",
-	Description = "",
-	Callback = function()
-		selectionStartBlock = nil
-		selectionEndBlock = nil
-		selectionPickMode = nil
-		destroySelectionVisuals()
-		updateSelectionStatus()
-	end
-})
-
-SelectionSection:AddButton({
-	Title = "Copy Selection To Preview",
-	Description = "",
-	Callback = function()
-		local blocks, err = getSelectionBlocks()
-		if not blocks then
-			notify("Preview", tostring(err), 4)
-			return
-		end
-
-		clearPreview()
-
-		local copied = 0
-		for _, block in ipairs(blocks) do
-			if spawnPreviewBlock(block.Name, block.CFrame) then
-				copied = copied + 1
-			end
-		end
-
-		updatePreviewStatus()
-		notify("Preview", string.format("Copied %d blocks into preview.", copied), 4)
-	end
-})
-
-local FileDropdown = StorageSection:AddDropdown("SchematicFiles", {
-	Title = "Files",
-	Values = getSchematicFileNames(),
-	Multi = false,
-	Default = 1
-})
-
-FileDropdown:OnChanged(function(value)
-	if type(value) == "string" and value ~= "" then
-		currentFileName = value
-	end
+harvestClosestButton.MouseButton1Click:Connect(function()
+    task.spawn(harvestClosest)
 end)
 
+harvestAllButton.MouseButton1Click:Connect(function()
+    task.spawn(harvestAll)
+end)
+
+resetButton.MouseButton1Click:Connect(function()
+    task.spawn(resetCapturedHash)
+end)
+
+-- Keyboard shortcuts
+local uis = game:GetService("UserInputService")
+uis.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.F then
+        findHarvestableObjects()
+    elseif input.KeyCode == Enum.KeyCode.H then
+        harvestClosest()
+    elseif input.KeyCode == Enum.KeyCode.A then
+        harvestAll()
+    elseif input.KeyCode == Enum.KeyCode.R then
+        resetCapturedHash()
+    end
+end)
+
+-- Initialize
+task.wait(1)
+
+-- Install the capture hook
+local hookSuccess, hookError = installHarvestCaptureHook()
+if hookSuccess then
+    statusLabel.Text = "Status: Ready! Manually harvest a crop to capture the hash."
+    print("=== HARVEST TOOL READY ===")
+    print("Simply manually harvest ONE crop")
+    print("The script will automatically capture the hash")
+    print("Then use F (Find), H (Harvest Closest), A (Harvest All)")
+    print("==========================")
+else
+    statusLabel.Text = "Status: Failed to install hook - " .. tostring(hookError)
+    print("Failed to install hook:", hookError)
+end
+
+-- Find initial objects
+findHarvestableObjects()
+
+-- Keep the script alive and print status periodically
 task.spawn(function()
-	while task.wait(5) do
-		FileDropdown:SetValues(getSchematicFileNames())
-	end
+    while true do
+        task.wait(30)
+        if capturedHash then
+            print("Hash still active:", capturedHash:sub(1, 30) .. "...")
+        end
+        -- Refresh object list periodically
+        findHarvestableObjects()
+    end
 end)
-
-StorageSection:AddInput("SchematicFileName", {
-	Title = "File Name",
-	Default = currentFileName,
-	Placeholder = "Template.json",
-	Numeric = false,
-	Finished = false,
-	Callback = function(value)
-		currentFileName = ensureJsonExtension(value)
-	end
-})
-
-StorageSection:AddButton({
-	Title = "Refresh File List",
-	Description = "",
-	Callback = function()
-		FileDropdown:SetValues(getSchematicFileNames())
-	end
-})
-
-StorageSection:AddButton({
-	Title = "Save Selection To File",
-	Description = "",
-	Callback = function()
-		local blocks, err = getSelectionBlocks()
-		if not blocks then
-			notify("Save", tostring(err), 4)
-			return
-		end
-
-		local data = buildSchematicData(blocks)
-		local encoded = HttpService:JSONEncode(data)
-		local path = getSchematicPath(currentFileName)
-
-		writefile(path, encoded)
-		lastSavedJson = encoded
-		currentFileName = ensureJsonExtension(currentFileName)
-
-		FileDropdown:SetValues(getSchematicFileNames())
-		notify("Save", "Selection saved to " .. extractFileName(path), 4)
-	end
-})
-
-StorageSection:AddButton({
-	Title = "Load File To Preview",
-	Description = "",
-	Callback = function()
-		local path = getSchematicPath(currentFileName)
-		if not isfile(path) then
-			notify("Load", "That file does not exist yet.", 4)
-			return
-		end
-
-		local fileData = readfile(path)
-		local ok, result = loadSchematicText(fileData)
-		if ok then
-			notify("Load", string.format("Loaded %d preview blocks from file.", result), 4)
-		else
-			notify("Load", tostring(result), 5)
-		end
-	end
-})
-
-StorageSection:AddButton({
-	Title = "Export Code To Clipboard",
-	Description = "",
-	Callback = function()
-		local exportText = nil
-		local path = getSchematicPath(currentFileName)
-
-		if isfile(path) then
-			exportText = readfile(path)
-		elseif lastSavedJson then
-			exportText = lastSavedJson
-		end
-
-		if not exportText or exportText == "" then
-			notify("Export", "Save or load a schematic first.", 4)
-			return
-		end
-
-		exportText = stripComments(exportText) or exportText
-		lastSavedJson = exportText
-
-		if copyToClipboard(exportText) then
-			notify("Export", "Schematic code copied to clipboard.", 4)
-		else
-			notify("Export", "Clipboard API is not available in this executor.", 4)
-		end
-	end
-})
-
-StorageSection:AddInput("ImportCodeInput", {
-	Title = "Import Code",
-	Default = "",
-	Placeholder = "paste exported json here",
-	Numeric = false,
-	Finished = false,
-	Callback = function(value)
-		importCodeValue = value or ""
-	end
-})
-
-StorageSection:AddButton({
-	Title = "Import Code From Clipboard",
-	Description = "",
-	Callback = function()
-		local clipboardText = getClipboardText()
-		if not clipboardText or clipboardText == "" then
-			notify("Import", "Clipboard is empty or unsupported.", 4)
-			return
-		end
-
-		local ok, result = loadSchematicText(clipboardText)
-		if ok then
-			notify("Import", string.format("Loaded %d preview blocks from clipboard.", result), 4)
-		else
-			notify("Import", tostring(result), 5)
-		end
-	end
-})
-
-StorageSection:AddButton({
-	Title = "Import Code From Input",
-	Description = "",
-	Callback = function()
-		if not importCodeValue or importCodeValue == "" then
-			notify("Import", "Paste code into the Import Code box first.", 4)
-			return
-		end
-
-		local ok, result = loadSchematicText(importCodeValue)
-		if ok then
-			notify("Import", string.format("Loaded %d preview blocks from input.", result), 4)
-		else
-			notify("Import", tostring(result), 5)
-		end
-	end
-})
-
-local BuildCollisionToggle = PreviewSection:AddToggle("BuildCollision", {
-	Title = "Build Collision",
-	Default = true
-})
-
-BuildCollisionToggle:OnChanged(function(value)
-	buildCollision = value
-	for _, block in ipairs(getPreviewBlocks()) do
-		block.CanCollide = buildCollision
-	end
-end)
-
-PreviewSection:AddInput("MoveStepBlocks", {
-	Title = "Move Step (Blocks)",
-	Default = "1",
-	Placeholder = "1",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		moveStepBlocks = math.max(1, tonumber(value) or 1)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Move Preview Up",
-	Description = "",
-	Callback = function()
-		movePreviewByBlocks(0, moveStepBlocks, 0)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Move Preview Down",
-	Description = "",
-	Callback = function()
-		movePreviewByBlocks(0, -moveStepBlocks, 0)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Move Preview Left",
-	Description = "",
-	Callback = function()
-		movePreviewByBlocks(-moveStepBlocks, 0, 0)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Move Preview Right",
-	Description = "",
-	Callback = function()
-		movePreviewByBlocks(moveStepBlocks, 0, 0)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Move Preview Forward",
-	Description = "",
-	Callback = function()
-		movePreviewByBlocks(0, 0, moveStepBlocks)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Move Preview Back",
-	Description = "",
-	Callback = function()
-		movePreviewByBlocks(0, 0, -moveStepBlocks)
-	end
-})
-
-PreviewSection:AddInput("DuplicateCount", {
-	Title = "Extra Copies",
-	Default = "1",
-	Placeholder = "1",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		duplicateCount = math.max(1, tonumber(value) or 1)
-	end
-})
-
-PreviewSection:AddInput("DuplicateOffsetX", {
-	Title = "Copy Offset X",
-	Default = "0",
-	Placeholder = "0",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		duplicateOffsetX = tonumber(value) or 0
-	end
-})
-
-PreviewSection:AddInput("DuplicateOffsetY", {
-	Title = "Copy Offset Y",
-	Default = "0",
-	Placeholder = "0",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		duplicateOffsetY = tonumber(value) or 0
-	end
-})
-
-PreviewSection:AddInput("DuplicateOffsetZ", {
-	Title = "Copy Offset Z",
-	Default = "0",
-	Placeholder = "0",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		duplicateOffsetZ = tonumber(value) or 0
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Duplicate Preview",
-	Description = "",
-	Callback = function()
-		local previewBlocks = getPreviewBlocks()
-		if #previewBlocks == 0 then
-			notify("Preview", "Load or copy a preview first.", 4)
-			return
-		end
-
-		local snapshot = {}
-		for _, previewBlock in ipairs(previewBlocks) do
-			table.insert(snapshot, {
-				name = previewBlock.Name,
-				cframe = previewBlock.CFrame
-			})
-		end
-
-		local added = 0
-		for copyIndex = 1, duplicateCount do
-			local offset = buildLocalOffset(
-				duplicateOffsetX * copyIndex,
-				duplicateOffsetY * copyIndex,
-				duplicateOffsetZ * copyIndex
-			)
-
-			for _, previewBlock in ipairs(snapshot) do
-				if spawnPreviewBlock(previewBlock.name, previewBlock.cframe + offset) then
-					added = added + 1
-				end
-			end
-		end
-
-		updatePreviewStatus()
-		notify("Preview", string.format("Added %d duplicate preview blocks.", added), 4)
-	end
-})
-
-PreviewSection:AddButton({
-	Title = "Clear Preview",
-	Description = "",
-	Callback = function()
-		if pasteInProgress then
-			notify("Preview", "Stop the paste first.", 3)
-			return
-		end
-
-		clearPreview()
-	end
-})
-
-local function pastePreview()
-	if pasteInProgress then
-		notify("Paste", "A paste is already running.", 3)
-		return
-	end
-
-	local previewBlocks = getPreviewBlocks()
-	if #previewBlocks == 0 then
-		notify("Paste", "Load or copy a preview first.", 3)
-		return
-	end
-
-	local ok, err = resolvePlacementHash(false)
-	if not ok then
-		notify("Paste", tostring(err), 5)
-		return
-	end
-
-	pasteInProgress = true
-
-	task.spawn(function()
-		local pending = {}
-		for _, block in ipairs(previewBlocks) do
-			table.insert(pending, block)
-		end
-
-		local total = #pending
-		local placed = 0
-		local noProgressLoops = 0
-
-		while pasteInProgress and #pending > 0 do
-			local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if not humanoidRootPart then
-				task.wait(0.5)
-				continue
-			end
-
-			local didPlace = false
-
-			for index = #pending, 1, -1 do
-				local previewBlock = pending[index]
-				if not previewBlock or not previewBlock.Parent then
-					table.remove(pending, index)
-				else
-					local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
-					if distance <= 50 then
-						local success = placeBlockRequest(previewBlock.CFrame, previewBlock.Name)
-						if success then
-							placed = placed + 1
-							didPlace = true
-							previewBlock:Destroy()
-							table.remove(pending, index)
-						end
-					end
-				end
-			end
-
-			if didPlace then
-				noProgressLoops = 0
-				updatePreviewStatus()
-				task.wait(0.15)
-			else
-				noProgressLoops = noProgressLoops + 1
-				if noProgressLoops >= 10 then
-					notify("Paste", "Move closer to the preview so more blocks are in range.", 4)
-					noProgressLoops = 0
-				end
-				task.wait(0.75)
-			end
-		end
-
-		local wasStopped = not pasteInProgress
-		pasteInProgress = false
-		updatePreviewStatus()
-
-		if wasStopped then
-			notify("Paste", string.format("Paste stopped after placing %d of %d blocks.", placed, total), 4)
-		else
-			notify("Paste", string.format("Finished placing %d blocks.", placed), 4)
-		end
-	end)
-end
-
-PasteSection:AddButton({
-	Title = "Paste Preview",
-	Description = "",
-	Callback = function()
-		pastePreview()
-	end
-})
-
-PasteSection:AddButton({
-	Title = "Stop Paste",
-	Description = "",
-	Callback = function()
-		if pasteInProgress then
-			pasteInProgress = false
-			notify("Paste", "Paste stopped.", 3)
-		else
-			notify("Paste", "No paste is running.", 3)
-		end
-	end
-})
-
-task.spawn(function()
-	while task.wait(1) do
-		updatePreviewStatus()
-	end
-end)
-
-task.spawn(function()
-	local hookOk, hookErr = installPlacementCaptureHook()
-	if hookOk then
-		updateRemoteStatus("manual placement capture armed")
-	else
-		updateRemoteStatus(tostring(hookErr))
-	end
-
-	local ok, err = resolvePlacementHash(false)
-	if ok then
-		notify("Remote", "Placement hash ready.", 3)
-	else
-		notify("Remote", tostring(err) .. " Place one block manually and the script should capture it.", 6)
-		if hookOk then
-			updateRemoteStatus("place one block manually to capture the placement hash")
-		end
-	end
-end)
-
-notify("Loaded", "Standalone Islands schematic script loaded.", 4)
