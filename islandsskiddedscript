@@ -585,9 +585,28 @@ espFolder.Name = "SwizESP_Folder"; espFolder.Parent = CoreGui
 local espCache = {}; local highlightCache = {}
 
 local function IsAuraOreMatch(block)
-    local bName = GetLowerBlockName(block); local isRock = string_find(bName, "rock") or string_find(bName, "stone") or string_find(bName, "ore")
-    if getgenv().SelectedOres["all"] and isRock then return true end
-    for oreName, isEnabled in pairs(getgenv().SelectedOres) do if isEnabled and oreName ~= "all" and string_find(bName, oreName) then return true end end
+    local bName = GetLowerBlockName(block)
+
+    -- ignore ore totems
+    if string_find(bName, "totem") then
+        return false
+    end
+
+    local isRock =
+        string_find(bName, "rock") or
+        string_find(bName, "stone") or
+        string_find(bName, "ore")
+
+    if getgenv().SelectedOres["all"] and isRock then
+        return true
+    end
+
+    for oreName, isEnabled in pairs(getgenv().SelectedOres) do
+        if isEnabled and oreName ~= "all" and string_find(bName, oreName) then
+            return true
+        end
+    end
+
     return false
 end
 local function IsEspOreMatch(block)
