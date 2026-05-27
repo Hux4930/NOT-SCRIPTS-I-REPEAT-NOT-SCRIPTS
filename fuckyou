@@ -8,7 +8,7 @@ end
 repeat wait() until game:IsLoaded()
 
 local IsPremium = true 
-local DidKey = true
+local DidKey = false
 local ScriptVersion = "V4"
 
 local FileName = "EdHub"
@@ -49,13 +49,68 @@ end
 function IsFolder(Name)
 	return isfolder(FileName.."/"..GameName.."/"..Name)
 end	
+
+
+function ReadFile(Name) 
+	-- Normalize absolute paths like .../EdHub/Islands/Schematica/Shop spawn -> Schematica/Shop spawn
+	local base = FileName.."/"..GameName.."/"
+	local normalized = Name
+	local startIndex = string.find(Name, base, 1, true)
+	if startIndex then
+		normalized = string.sub(Name, startIndex + #base)
+	end
+
+	-- Only perform reads inside our sandboxed base directory
+	if isfile(base..normalized) == true then
+		return readfile(base..normalized)
+	end
+	if isfile(FileName.."/"..GameName..Name) == true then
+		return readfile(FileName.."/"..GameName..Name)
+	end
+	if isfile(Name) == true and not string.match(Name, "^/") then
+		-- Last-gasp relative path without a leading slash
+		return readfile(Name)
+	end
+	return nil
+end
+
+
+function CreateFile(Name, Data, CheckIfFile)
+	if CheckIfFile == true then
+		if isfile(FileName.."/"..GameName.."/"..Name) then
+
+		else
+			writefile(FileName.."/"..GameName.."/"..Name, Data)
+		end
+	else
+		writefile(FileName.."/"..GameName.."/"..Name, Data)
+	end
+end	
+
 -- local TemplateFile = game:HttpGet("https://pastebin.com/raw/yQUgfbZy")
 -- CreateFile("/Schematica/Template", TemplateFile, false)
 
 
 task.wait(1)
 
+function GetSchematicaFiles()
+	local Path = FileName.."/"..GameName.."/".."Schematica"
 
+	local Files = listfiles(Path)
+
+	if not Files or (#Files == 0) then
+		local TemplateFile = game:HttpGet("https://pastebin.com/raw/yQUgfbZy")
+		CreateFile("/Schematica/Template", TemplateFile, false)
+
+		task.wait(1)
+
+		local Files = listfiles(Path)
+
+		return Files;
+
+	else
+		return Files;
+	end
 
 
 
@@ -67,6 +122,11 @@ task.wait(1)
 
 	]]
 end
+
+CreateFolder("Schematica")
+
+CreateFolder("ello")
+
 -- if _G.UJGNAIKGNAJGNJSAGNLSAGLSLKRGJLKNIGANBJIERGBJISRABIGBSJIGNBSHGNNKISGABISGBSNGJSNJGSNGLJKSNG == true then
 
 if IsPremium == false then -- true
@@ -359,6 +419,8 @@ function Remotes()
 
 	else
 
+		CreateFolder("Hash System")
+
 		print("Getting Hashes!")
 
 		CreateFile("Game Version", tostring(game.PlaceVersion), false)
@@ -382,6 +444,16 @@ function Remotes()
 						task.wait(0.2)
 						Tool = Clone
 					end
+				end
+
+				local function getrem(p9)
+					rem = ""
+					for i,v in pairs(game:GetService("ReplicatedStorage")["rbxts_include"]["node_modules"]["@rbxts"].net.out["_NetManaged"]:GetChildren()) do
+						if v.Name:match(p9) then
+							rem = v
+						end
+					end
+					return rem.Name
 				end
 				local remleft = ""
 				mobrem = ""
@@ -7571,100 +7643,410 @@ end
 		local LASTSAVEDSDATA
 
 		local CopyPasteSelection = Tabs.BlockPrinter:AddSection("Copy / paste!")
+		local HttpService = game:GetService("HttpService")
+		local BlocksFolder = game:GetService("ReplicatedStorage").Blocks
+		local NetManaged = game:GetService("ReplicatedStorage").rbxts_include.node_modules["@rbxts"].net.out._NetManaged
+		local BlockGridSize = 3
+		local SchematicFormatVersion = 2
+
+		local ImportCodeValue = ""
+		local PreviewMoveBlocks = 1
+		local DuplicatePreviewCount = 1
+		local DuplicatePreviewOffsetX = 0
+		local DuplicatePreviewOffsetY = 0
+		local DuplicatePreviewOffsetZ = 0
+
+		local function IsPreviewBlock(previewBlock)
+			return previewBlock
+				and previewBlock.Parent == CloneFolder
+				and (previewBlock:IsA("Part") or previewBlock:IsA("MeshPart"))
+				and previewBlock.Name ~= "PrimaryPart"
+		end
+
+		local function ClearPreviewBlocks()
+			if not CloneFolder then
+				return
+			end
+
+			for _, previewBlock in ipairs(CloneFolder:GetChildren()) do
+				previewBlock:Destroy()
+			end
+
+			CloneFolder.PrimaryPart = nil
+		end
+
+		local function GetPreviewBlocks()
+			local previewBlocks = {}
+
+			if not CloneFolder then
+				return previewBlocks
+			end
+
+			for _, previewBlock in ipairs(CloneFolder:GetChildren()) do
+				if IsPreviewBlock(previewBlock) then
+					table.insert(previewBlocks, previewBlock)
+				end
+			end
+
+			return previewBlocks
+		end
+
+		local function EnsurePreviewPrimaryPart()
+			if not CloneFolder then
+				return nil
+			end
+
+			if CloneFolder.PrimaryPart and CloneFolder.PrimaryPart.Parent == CloneFolder then
+				return CloneFolder.PrimaryPart
+			end
+
+			for _, previewBlock in ipairs(CloneFolder:GetChildren()) do
+				if IsPreviewBlock(previewBlock) then
+					CloneFolder.PrimaryPart = previewBlock
+					return previewBlock
+				end
+			end
+
+			return nil
+		end
+
+		local function BuildPreviewOffsetVector(xBlocks, yBlocks, zBlocks)
+			local xStuds = (tonumber(xBlocks) or 0) * BlockGridSize
+			local yStuds = (tonumber(yBlocks) or 0) * BlockGridSize
+			local zStuds = (tonumber(zBlocks) or 0) * BlockGridSize
+
+			local primary = EnsurePreviewPrimaryPart()
+			if not primary then
+				return Vector3.new(xStuds, yStuds, zStuds)
+			end
+
+			return (primary.CFrame.RightVector * xStuds)
+				+ (primary.CFrame.UpVector * yStuds)
+				+ (primary.CFrame.LookVector * zStuds)
+		end
+
+		local function MovePreviewByBlocks(xBlocks, yBlocks, zBlocks)
+			local primary = EnsurePreviewPrimaryPart()
+			if not primary then
+				Message("Info", "Load or clone a preview first.", "Okay!", 3)
+				return false
+			end
+
+			CloneFolder:SetPrimaryPartCFrame(primary.CFrame + BuildPreviewOffsetVector(xBlocks, yBlocks, zBlocks))
+			task.wait()
+			pcall(activated)
+			return true
+		end
+
+		local function GetSelectionBlocks()
+			local selectionPart = game:GetService("Workspace"):FindFirstChild("NewPart")
+			if not selectionPart then
+				return nil, "No NewPart found! Please select blocks first."
+			end
+
+			local selectedBlocks = {}
+			local blocksInSelection = GetBlocks(selectionPart.Position, selectionPart.Size, selectionPart)
+			for _, selectedBlock in pairs(blocksInSelection) do
+				if selectedBlock.Parent and selectedBlock.Parent.Name == "Blocks" then
+					table.insert(selectedBlocks, selectedBlock)
+				end
+			end
+
+			if #selectedBlocks == 0 then
+				return nil, "No blocks were found inside the selection."
+			end
+
+			return selectedBlocks, nil, selectionPart
+		end
+
+		local function GetSelectionOrigin(selectedBlocks)
+			local minX, minY, minZ = math.huge, math.huge, math.huge
+
+			for _, selectedBlock in ipairs(selectedBlocks) do
+				local position = selectedBlock.Position
+				if position.X < minX then
+					minX = position.X
+				end
+				if position.Y < minY then
+					minY = position.Y
+				end
+				if position.Z < minZ then
+					minZ = position.Z
+				end
+			end
+
+			return Vector3.new(minX, minY, minZ)
+		end
+
+		local function BuildSchematicData(selectedBlocks, selectionPart)
+			local origin = GetSelectionOrigin(selectedBlocks)
+			local originCFrame = CFrame.new(origin)
+			local data = {
+				FormatVersion = SchematicFormatVersion,
+				BlockSize = BlockGridSize,
+				Origin = {origin.X, origin.Y, origin.Z},
+				Size = {tostring(selectionPart.Size)},
+				SelectionSize = {selectionPart.Size.X, selectionPart.Size.Y, selectionPart.Size.Z},
+				Blocks = {}
+			}
+
+			table.sort(selectedBlocks, function(a, b)
+				if a.Position.Y ~= b.Position.Y then
+					return a.Position.Y < b.Position.Y
+				end
+				if a.Position.X ~= b.Position.X then
+					return a.Position.X < b.Position.X
+				end
+				if a.Position.Z ~= b.Position.Z then
+					return a.Position.Z < b.Position.Z
+				end
+				return a.Name < b.Name
+			end)
+
+			for _, selectedBlock in ipairs(selectedBlocks) do
+				local blockName = selectedBlock.Name
+				local relativeCFrame = originCFrame:ToObjectSpace(selectedBlock.CFrame)
+
+				if not data.Blocks[blockName] then
+					data.Blocks[blockName] = {}
+				end
+
+				table.insert(data.Blocks[blockName], {
+					C = {relativeCFrame.components(relativeCFrame)}
+				})
+			end
+
+			return data
+		end
+
+		local function StripSchematicComments(text)
+			if type(text) ~= "string" then
+				return nil
+			end
+
+			return text:gsub("%-%-.-\n", "\n")
+		end
+
+		local function DecodeSchematicText(text)
+			if type(text) ~= "string" or text == "" then
+				return nil, "No schematic code was provided."
+			end
+
+			local cleaned = StripSchematicComments(text)
+			local success, decoded = pcall(function()
+				return HttpService:JSONDecode(cleaned)
+			end)
+
+			if not success then
+				return nil, tostring(decoded)
+			end
+
+			return decoded, cleaned
+		end
+
+		local function SpawnPreviewBlock(blockName, worldCFrame)
+			local previewName = blockName
+			if previewName == "dirt" then
+				previewName = "soil"
+			end
+
+			local blockModel = BlocksFolder:FindFirstChild(previewName)
+			if not blockModel then
+				warn("Preview block missing:", previewName)
+				return nil
+			end
+
+			local root = blockModel:FindFirstChild("Root")
+			if not root then
+				warn("Preview Root missing:", previewName)
+				return nil
+			end
+
+			local previewBlock = root:Clone()
+			previewBlock.Name = previewName
+			previewBlock.Transparency = 0.5
+			previewBlock.Anchored = true
+			previewBlock.CanCollide = _G.BuildCollision
+			previewBlock.Locked = false
+			previewBlock.Parent = CloneFolder
+			previewBlock.CFrame = worldCFrame
+			return previewBlock
+		end
+
+		local function LoadDecodedSchematic(decoded, sourceLabel)
+			if not decoded then
+				return false, "No decoded schematic data."
+			end
+
+			ClearPreviewBlocks()
+
+			local loadedBlocks = 0
+
+			if decoded.Blocks then
+				local originTable = decoded.Origin
+				local originVector = nil
+
+				if type(originTable) == "table" then
+					originVector = Vector3.new(
+						tonumber(originTable[1]) or 0,
+						tonumber(originTable[2]) or 0,
+						tonumber(originTable[3]) or 0
+					)
+				end
+
+				local originCFrame = originVector and CFrame.new(originVector) or nil
+
+				for blockName, blocks in pairs(decoded.Blocks) do
+					for _, block in ipairs(blocks) do
+						if block.C then
+							local savedCFrame = CFrame.new(unpack(block.C))
+							local worldCFrame = originCFrame and originCFrame:ToWorldSpace(savedCFrame) or savedCFrame
+							if SpawnPreviewBlock(blockName, worldCFrame) then
+								loadedBlocks = loadedBlocks + 1
+							end
+						end
+					end
+				end
+			else
+				for blockName, blocks in pairs(decoded) do
+					for _, block in ipairs(blocks) do
+						local x, y, z = block[1], block[2], block[3]
+						local worldCFrame = CFrame.new(Vector3.new(x, y, z))
+						if SpawnPreviewBlock(blockName, worldCFrame) then
+							loadedBlocks = loadedBlocks + 1
+						end
+					end
+				end
+			end
+
+			if loadedBlocks == 0 then
+				return false, "No blocks could be loaded from " .. tostring(sourceLabel or "this schematic") .. "."
+			end
+
+			task.wait()
+			pcall(activated)
+			return true, loadedBlocks
+		end
+
+		local function LoadSchematicText(text, sourceLabel)
+			local decoded, cleanedOrError = DecodeSchematicText(text)
+			if not decoded then
+				return false, cleanedOrError
+			end
+
+			LASTSAVEDSDATA = cleanedOrError
+			return LoadDecodedSchematic(decoded, sourceLabel)
+		end
+
+		local function GetClipboardText()
+			if type(getclipboard) == "function" then
+				return getclipboard()
+			end
+			if type(readclipboard) == "function" then
+				return readclipboard()
+			end
+			return nil
+		end
+
+		local function CopyTextToClipboard(text)
+			if type(setclipboard) == "function" then
+				setclipboard(text)
+				return true
+			end
+			return false
+		end
+
+		local function GetPlacementHash()
+			local hashNameValue = RemoteData:FindFirstChild("BlockPlaceHashData")
+			local hashValue = _G.BlockPlaceHash
+
+			if hashNameValue and hashNameValue.Value and hashNameValue.Value ~= "" and hashValue and hashValue ~= "" then
+				return hashNameValue.Value, hashValue
+			end
+
+			local fallbackHashNameValue = RemoteData:FindFirstChild("CropPlaceHashData")
+			local fallbackHashValue = _G.CropPlaceHash
+
+			if fallbackHashNameValue and fallbackHashNameValue.Value and fallbackHashNameValue.Value ~= "" and fallbackHashValue and fallbackHashValue ~= "" then
+				return fallbackHashNameValue.Value, fallbackHashValue
+			end
+
+			return PlaceHASHName, PlaceHASH or CropPlaceH2
+		end
+
+		local function PlaceBlockRequest(position, blockName)
+			local placeRemote = NetManaged:FindFirstChild("CLIENT_BLOCK_PLACE_REQUEST")
+			if not placeRemote then
+				return false, "CLIENT_BLOCK_PLACE_REQUEST is missing."
+			end
+
+			local placeHashName, placeHashValue = GetPlacementHash()
+			if not placeHashName or not placeHashValue then
+				return false, "Block place hash data is missing."
+			end
+
+			local args = {
+				["upperBlock"] = false,
+				["cframe"] = position,
+				["blockType"] = blockName,
+				[placeHashName] = placeHashValue
+			}
+
+			return pcall(function()
+				placeRemote:InvokeServer(args)
+			end)
+		end
 
 		CopyPasteSelection:AddButton({
 			Title = "Clone Blocks",
 			Description = "",
 			Callback = function()
-				-- Check if paste is currently running
 				if _G.PasteInProgress then
 					Message("Warning!", "Cannot clone blocks while paste is in progress! Wait for paste to complete.", "Okay!", 3)
 					return
 				end
-				
-				-- Automatically turn off resize tool when cloning blocks
+
 				if Options.UseMovingTool and Options.UseMovingTool.Value then
 					Options.UseMovingTool:SetValue(false)
 				end
-				
-				for i,v in ipairs(CloneFolder:GetChildren()) do
-					v:Destroy()
-					DebugCheck(0,v.Name.." Got Deleted!")
+
+				ClearPreviewBlocks()
+
+				local selectedBlocks, errorText = GetSelectionBlocks()
+				if not selectedBlocks then
+					Message("Error!", errorText, "Okay!", 3)
+					return
 				end
 
+				local blockCounts = {}
+				local totalBlocks = 0
 
-				local positions = {}
+				for _, selectedBlock in ipairs(selectedBlocks) do
+					local previewBlock = selectedBlock:Clone()
+					previewBlock.Parent = CloneFolder
+					previewBlock.CFrame = selectedBlock.CFrame
+					previewBlock.Transparency = 0.5
+					previewBlock.Anchored = true
+					previewBlock.CanCollide = _G.BuildCollision
+					previewBlock.Locked = false
 
-				local function checkPositions(start, finish)
-					local minX = math.min(start.x, finish.x)
-					local maxX = math.max(start.x, finish.x)
-					local minY = math.min(start.y, finish.y)
-					local maxY = math.max(start.y, finish.y)
-					local minZ = math.min(start.z, finish.z)
-					local maxZ = math.max(start.z, finish.z)
-					return Vector3.new(minX, minY, minZ), Vector3.new(maxX, maxY, maxZ)
+					blockCounts[previewBlock.Name] = (blockCounts[previewBlock.Name] or 0) + 1
+					totalBlocks = totalBlocks + 1
 				end
 
-				local start = _G.StartBlock.Position
-				local finish = _G.EndBlock.Position
-				start, finish = checkPositions(start, finish)
+				print("=== BLOCKS COPIED ===")
+				print("Total blocks copied:", totalBlocks)
+				print("Block types found:")
 
-				for x = start.x, finish.x, 3 do
-					for y = start.y, finish.y, 3 do
-						for z = start.z, finish.z, 3 do
-							positions[#positions + 1] = Vector3.new(x, y, z)
-						end
-					end
+				for blockName, count in pairs(blockCounts) do
+					print("  " .. blockName .. ": " .. count .. " blocks")
 				end
 
-				if 	game:GetService("Workspace"):FindFirstChild("NewPart") then
-					local PART = game:GetService("Workspace"):FindFirstChild("NewPart")
-					local BLOCKS = GetBlocks(PART.Position, PART.Size, PART)
-					
-					-- Block counting and listing
-					local blockCounts = {}
-					local totalBlocks = 0
-					local copiedBlocks = {}
-					
-					for i,SB in pairs(BLOCKS) do
-						if SB.Parent.Name == "Blocks" then
-							-- Count block types
-							local blockName = SB.Name
-							blockCounts[blockName] = (blockCounts[blockName] or 0) + 1
-							totalBlocks = totalBlocks + 1
-							
-							-- Clone the block
-							local NEWSB = SB:Clone()
-							NEWSB.Parent = CloneFolder
-							NEWSB.Position = SB.Position + Vector3.new(0,3,0)
-							NEWSB.Transparency = 0.5
-							
-							-- Add to copied blocks list
-							table.insert(copiedBlocks, {
-								name = blockName,
-								position = SB.Position,
-								cframe = SB.CFrame
-							})
-						end
-					end
-					
-					-- Display block information
-					print("=== BLOCKS COPIED ===")
-					print("Total blocks copied:", totalBlocks)
-					print("Block types found:")
-					
-					for blockName, count in pairs(blockCounts) do
-						print("  " .. blockName .. ": " .. count .. " blocks")
-					end
-					
-					print("=== END BLOCK LIST ===")
-					
-					-- Show notification with block count
-					Message("Blocks Copied!", "Successfully copied " .. totalBlocks .. " blocks! Check console for details.", "Nice!", 5)
-				else
-					Message("Error!", "No NewPart found! Please select blocks first.", "Okay!", 3)
-				end
+				print("=== END BLOCK LIST ===")
 
+				task.wait()
+				pcall(activated)
+				Message("Blocks Copied!", "Successfully copied " .. totalBlocks .. " blocks into preview.", "Nice!", 5)
 			end
 		})
 
@@ -7688,11 +8070,16 @@ end
 
 				local positions = {}
 
-				for i,v in pairs(CloneFolder:GetChildren()) do
+				for i,v in ipairs(GetPreviewBlocks()) do
 					if v then
 						positions[i] = v
 						DebugCheck(0,"Added:",v.Name)
 					end
+				end
+
+				if #positions == 0 then
+					Message("Info", "Load or clone a preview first.", "Okay!", 3)
+					return
 				end
 
 				local PLOW = false
@@ -7723,19 +8110,7 @@ end
 
 				-- Improved paste system with proper preview management
 				local function PlaceBlockSafely(block, position, blockName)
-					local args = {
-						[1] = {
-							["upperBlock"] = false,
-							["cframe"] = position,
-							["blockType"] = blockName,
-							[CropPlaceH1] = CropPlaceH2
-						}
-					}
-					
-					-- Use pcall to handle errors
-					local success, result = pcall(function()
-						game:GetService("ReplicatedStorage").rbxts_include.node_modules:FindFirstChild("@rbxts").net.out._NetManaged.CLIENT_BLOCK_PLACE_REQUEST:InvokeServer(unpack(args))
-					end)
+					local success, result = PlaceBlockRequest(position, blockName)
 					
 					if success then
 						print("Placed block:", blockName)
@@ -8156,121 +8531,89 @@ end
 			end
 		})
 
+		CopyPasteSelection:AddInput("PreviewMoveBlocks", {
+			Title = "Move Step (Blocks)",
+			Default = "1",
+			Placeholder = "1",
+			Numeric = true,
+			Finished = false,
+			Callback = function(Value)
+				PreviewMoveBlocks = math.max(1, tonumber(Value) or 1)
+			end
+		})
+
+		CopyPasteSelection:AddInput("DuplicatePreviewCount", {
+			Title = "Extra Copies",
+			Default = "1",
+			Placeholder = "1",
+			Numeric = true,
+			Finished = false,
+			Callback = function(Value)
+				DuplicatePreviewCount = math.max(1, tonumber(Value) or 1)
+			end
+		})
+
+		CopyPasteSelection:AddInput("DuplicatePreviewOffsetX", {
+			Title = "Copy Offset X",
+			Default = "0",
+			Placeholder = "0",
+			Numeric = true,
+			Finished = false,
+			Callback = function(Value)
+				DuplicatePreviewOffsetX = tonumber(Value) or 0
+			end
+		})
+
+		CopyPasteSelection:AddInput("DuplicatePreviewOffsetY", {
+			Title = "Copy Offset Y",
+			Default = "0",
+			Placeholder = "0",
+			Numeric = true,
+			Finished = false,
+			Callback = function(Value)
+				DuplicatePreviewOffsetY = tonumber(Value) or 0
+			end
+		})
+
+		CopyPasteSelection:AddInput("DuplicatePreviewOffsetZ", {
+			Title = "Copy Offset Z",
+			Default = "0",
+			Placeholder = "0",
+			Numeric = true,
+			Finished = false,
+			Callback = function(Value)
+				DuplicatePreviewOffsetZ = tonumber(Value) or 0
+			end
+		})
+
+		CopyPasteSelection:AddInput("ImportCodeValue", {
+			Title = "Import Code",
+			Default = "",
+			Placeholder = "Paste exported JSON here",
+			Numeric = false,
+			Finished = false,
+			Callback = function(Value)
+				ImportCodeValue = Value or ""
+			end
+		})
+
 		CopyPasteSelection:AddButton({
 			Title = "Save Blocks to File!",
 			Description = "",
 			Callback = function()
-				for i,v in ipairs(CloneFolder:GetChildren()) do
-					v:Destroy()
-					DebugCheck(0,v.Name.." Got Deleted!")
+				local selectedBlocks, errorText, selectionPart = GetSelectionBlocks()
+				if not selectedBlocks then
+					Message("Error!", errorText, "Okay!", 3)
+					return
+				end
+				local targetFileName = FileName
+				if not targetFileName or targetFileName == "" then
+					targetFileName = "Template"
+					FileName = targetFileName
 				end
 
-
-				local positions = {}
-
-				local function checkPositions(start, finish)
-					local minX = math.min(start.x, finish.x)
-					local maxX = math.max(start.x, finish.x)
-					local minY = math.min(start.y, finish.y)
-					local maxY = math.max(start.y, finish.y)
-					local minZ = math.min(start.z, finish.z)
-					local maxZ = math.max(start.z, finish.z)
-					return Vector3.new(minX, minY, minZ), Vector3.new(maxX, maxY, maxZ)
-				end
-
-				local start = _G.StartBlock.Position
-				local finish = _G.EndBlock.Position
-				start, finish = checkPositions(start, finish)
-
-				for x = start.x, finish.x, 3 do
-					for y = start.y, finish.y, 3 do
-						for z = start.z, finish.z, 3 do
-							positions[#positions + 1] = Vector3.new(x, y, z)
-						end
-					end
-				end
-
-				-- HIER --
-
-				local function isVisible(part)
-					return part.Transparency == 0 and part.CanCollide == true and part.Size.X > 0 and part.Size.Y > 0 and part.Size.Z > 0
-				end
-
-				function findCenter(Table)
-					local parts = Table
-					local numVisibleParts = 0
-					local totalPosition = Vector3.new(0, 0, 0)
-					local MittigsterBlock = nil
-
-
-					for _, part in ipairs(parts) do
-						if part:IsA("Part") or part:IsA("MeshPart") then
-							print(part.Name)
-							totalPosition = totalPosition + part.Position
-							MittigsterBlock = part
-							numVisibleParts = numVisibleParts + 1
-						else
-							print(part.Name.." ist ein "..part.ClassName)
-						end
-					end
-
-
-					if numVisibleParts > 0 then
-						local centerPos = totalPosition / numVisibleParts
-						return centerPos
-					else
-						return nil 
-					end
-				end
-
-				local SaveData = {}
-
-				if 	game:GetService("Workspace"):FindFirstChild("NewPart") then
-					local PART = game:GetService("Workspace"):FindFirstChild("NewPart")
-					local BLOCKS = GetBlocks(PART.Position, PART.Size, PART)
-					for i,v in pairs(BLOCKS) do
-						if v.Parent.Name == "Blocks" then
-							table.insert(SaveData, v)
-						end
-					end
-				end
-
-				local MittePosition = findCenter(SaveData)
-
-				print("Der Part is ", tostring(MittePosition))
-
-				local data = {
-					Size = {tostring(game:GetService("Workspace"):FindFirstChild("NewPart").Size)},
-					Blocks = {
-
-					}
-				}
-
-
-				local function save(name, cframe)
-					if not data.Blocks[name] then
-						data.Blocks[name] = {}
-					end
-					table.insert(data.Blocks[name], {C = {cframe.components(cframe)}})
-				end
-
-				if 	game:GetService("Workspace"):FindFirstChild("NewPart") then
-					local PART = game:GetService("Workspace"):FindFirstChild("NewPart")
-					local BLOCKS = GetBlocks(PART.Position, PART.Size, PART)
-					for i,v in pairs(BLOCKS) do
-						if v.Parent.Name == "Blocks" then
-							save(v.Name, v.CFrame)
-						end
-					end
-				end
-
-				DebugCheck(0,"PRINTING SOON!!!")
-
-				task.wait()
-
-				local json = game:GetService("HttpService")
-				local dataString = json:JSONEncode(data)
-				LASTSAVEDSDATA = dataString
+				local data = BuildSchematicData(selectedBlocks, selectionPart)
+				LASTSAVEDSDATA = HttpService:JSONEncode(data)
 
 				task.wait()
 
@@ -8292,7 +8635,7 @@ end
 
 					local WERBUNG = [[-- Generated With Islands.God (discord.gg/MbsxuDEzgT) Version: 0.4 Beta]].."\n".."--"..GetMore().." \n"
 
-					CreateFile("/Schematica/"..FileName, WERBUNG.."\n"..LASTSAVEDSDATA, false)
+					CreateFile("/Schematica/"..targetFileName, WERBUNG.."\n"..LASTSAVEDSDATA, false)
 
 					task.wait(0.5)
 
@@ -8312,6 +8655,26 @@ end
 			Callback = function()
 
 				print("FileName:",FileName)
+
+				if IsFile("/Schematica/"..FileName) == true then
+					local fileData = ReadFile("/Schematica/"..FileName, LASTSAVEDSDATA)
+					if not fileData then
+						Message("Error!", "Could not read the selected schematic file.", "Okay!", 3)
+						return
+					end
+
+					local success, result = LoadSchematicText(fileData, FileName)
+					if success then
+						task.wait(0.2)
+						Message("Loaded!", "Loaded " .. tostring(result) .. " preview blocks from file.", "Nice!", 3)
+					else
+						Message("Error!", tostring(result), "Okay!", 3)
+					end
+				else
+					Message("Error!", "That schematic file does not exist.", "Okay!", 3)
+				end
+
+				return
 
 				local ALLBLOCKS = game:GetService("ReplicatedStorage").Blocks
 				if IsFile("/Schematica/"..FileName) ~= nil then
@@ -8398,6 +8761,160 @@ end
 		})
 
 
+
+		CopyPasteSelection:AddButton({
+			Title = "Export File Code",
+			Description = "",
+			Callback = function()
+				local exportText = nil
+
+				if IsFile("/Schematica/"..FileName) == true then
+					exportText = ReadFile("/Schematica/"..FileName)
+				end
+
+				if (not exportText or exportText == "") and LASTSAVEDSDATA then
+					exportText = LASTSAVEDSDATA
+				end
+
+				if not exportText or exportText == "" then
+					Message("Error!", "Save or load a schematic first.", "Okay!", 3)
+					return
+				end
+
+				exportText = StripSchematicComments(exportText) or exportText
+				LASTSAVEDSDATA = exportText
+
+				if CopyTextToClipboard(exportText) then
+					Message("Copied!", "Schematic code copied to clipboard.", "Nice!", 3)
+				else
+					Message("Error!", "Clipboard API is not available here. Use the Import Code box instead.", "Okay!", 3)
+				end
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Import Code From Clipboard",
+			Description = "",
+			Callback = function()
+				local clipboardText = GetClipboardText()
+				if not clipboardText or clipboardText == "" then
+					Message("Error!", "Clipboard is empty or unsupported.", "Okay!", 3)
+					return
+				end
+
+				local success, result = LoadSchematicText(clipboardText, "clipboard")
+				if success then
+					Message("Imported!", "Loaded " .. tostring(result) .. " preview blocks from clipboard.", "Nice!", 3)
+				else
+					Message("Error!", tostring(result), "Okay!", 3)
+				end
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Import Code From Input",
+			Description = "",
+			Callback = function()
+				if not ImportCodeValue or ImportCodeValue == "" then
+					Message("Error!", "Paste the exported code into Import Code first.", "Okay!", 3)
+					return
+				end
+
+				local success, result = LoadSchematicText(ImportCodeValue, "input")
+				if success then
+					Message("Imported!", "Loaded " .. tostring(result) .. " preview blocks from input.", "Nice!", 3)
+				else
+					Message("Error!", tostring(result), "Okay!", 3)
+				end
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Move Preview Up",
+			Description = "",
+			Callback = function()
+				MovePreviewByBlocks(0, PreviewMoveBlocks, 0)
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Move Preview Down",
+			Description = "",
+			Callback = function()
+				MovePreviewByBlocks(0, -PreviewMoveBlocks, 0)
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Move Preview Left",
+			Description = "",
+			Callback = function()
+				MovePreviewByBlocks(-PreviewMoveBlocks, 0, 0)
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Move Preview Right",
+			Description = "",
+			Callback = function()
+				MovePreviewByBlocks(PreviewMoveBlocks, 0, 0)
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Move Preview Forward",
+			Description = "",
+			Callback = function()
+				MovePreviewByBlocks(0, 0, PreviewMoveBlocks)
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Move Preview Back",
+			Description = "",
+			Callback = function()
+				MovePreviewByBlocks(0, 0, -PreviewMoveBlocks)
+			end
+		})
+
+		CopyPasteSelection:AddButton({
+			Title = "Duplicate Preview",
+			Description = "",
+			Callback = function()
+				local previewBlocks = GetPreviewBlocks()
+				if #previewBlocks == 0 then
+					Message("Info", "Load or clone a preview first.", "Okay!", 3)
+					return
+				end
+
+				local snapshot = {}
+				for _, previewBlock in ipairs(previewBlocks) do
+					table.insert(snapshot, {
+						name = previewBlock.Name,
+						cframe = previewBlock.CFrame
+					})
+				end
+
+				local addedBlocks = 0
+				for copyIndex = 1, DuplicatePreviewCount do
+					local offset = BuildPreviewOffsetVector(
+						DuplicatePreviewOffsetX * copyIndex,
+						DuplicatePreviewOffsetY * copyIndex,
+						DuplicatePreviewOffsetZ * copyIndex
+					)
+
+					for _, previewBlock in ipairs(snapshot) do
+						if SpawnPreviewBlock(previewBlock.name, previewBlock.cframe + offset) then
+							addedBlocks = addedBlocks + 1
+						end
+					end
+				end
+
+				task.wait()
+				pcall(activated)
+				Message("Duplicated!", "Added " .. addedBlocks .. " extra preview blocks.", "Nice!", 3)
+			end
+		})
 
 		local LastTarget = nil
 		local NewTarget = false
@@ -8701,11 +9218,7 @@ end
 
 				task.wait()
 
-				if CloneFolder then
-					for i,v in pairs(CloneFolder:GetChildren()) do
-						v:Destroy()
-					end
-				end
+				ClearPreviewBlocks()
 			end
 		})
 
@@ -8719,7 +9232,7 @@ end
 		task.spawn(function()
 			while wait() do
 				for i,v in pairs(CloneFolder:GetChildren()) do
-					if v:IsA("Part") or v:IsA("MeshPart") then
+					if IsPreviewBlock(v) then
 						v.CanCollide = _G.BuildCollision
 					end
 				end	
@@ -10200,7 +10713,7 @@ end)
 
 local Section = Tab:CreateSection("Loader Settings")
 
---("AutoStart")
+CreateFolder("AutoStart")
 CreateFile("/AutoStart/AutoLoadSettings", "false", true)
 
 local Button = Tab:CreateButton({
