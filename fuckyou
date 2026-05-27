@@ -147,21 +147,39 @@ local function safeLower(value)
     return string.lower(safeToString(value))
 end
 
--- Get NetManaged
-local function getNetManaged()
+-- Find the harvest remote properly
+local function findHarvestRemote()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local success, result = pcall(function()
-        return ReplicatedStorage
-            :WaitForChild("rbxts_include")
-            :WaitForChild("node_modules")
-            :WaitForChild("@rbxts")
-            :WaitForChild("net")
-            :WaitForChild("out")
-            :WaitForChild("_NetManaged")
-    end)
     
-    if success then return result end
-    return nil
+    -- Try different possible paths
+    local paths = {
+        "rbxts_include.node_modules.@rbxts.net.out._NetManaged.CLIENT_HARVEST_CROP_REQUEST",
+        "rbxts_include.node_modules[@rbxts].net.out._NetManaged.CLIENT_HARVEST_CROP_REQUEST",
+        "CLIENT_HARVEST_CROP_REQUEST"
+    }
+    
+    for _, path in ipairs(paths) do
+        local remote = ReplicatedStorage:FindFirstChild(path)
+        if remote then
+            return remote
+        end
+    end
+    
+    -- Search recursively
+    local function searchRecursive(parent, searchName)
+        for _, child in ipairs(parent:GetChildren()) do
+            if child.Name == searchName then
+                return child
+            end
+            if child:IsA("Folder") or child:IsA("ModuleScript") then
+                local found = searchRecursive(child, searchName)
+                if found then return found end
+            end
+        end
+        return nil
+    end
+    
+    return searchRecursive(ReplicatedStorage, "CLIENT_HARVEST_CROP_REQUEST")
 end
 
 -- Try to capture hash from payload
@@ -214,24 +232,13 @@ local function installHarvestCaptureHook()
         return false, "Executor missing required functions"
     end
     
-    local netManaged = getNetManaged()
-    if not netManaged then
-        statusLabel.Text = "Status: Cannot find NetManaged!"
-        return false, "NetManaged not found"
-    end
-    
-    harvestRemote = netManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST")
-    if not harvestRemote then
-        statusLabel.Text = "Status: Cannot find harvest remote!"
-        return false, "Harvest remote not found"
-    end
-    
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
         local args = { ... }
         local method = getnamecallmethod()
         
-        if method == "InvokeServer" and typeof(self) == "Instance" and self.Name == "CLIENT_HARVEST_CROP_REQUEST" then
+        -- Check for InvokeServer calls
+        if method == "InvokeServer" and self and self.Name == "CLIENT_HARVEST_CROP_REQUEST" then
             -- Check if this is a game call (not from our script)
             local isGameCall = true
             if type(checkcaller) == "function" then
@@ -283,7 +290,7 @@ local function getBlockPosition(block)
     return Vector3.new(0, 0, 0)
 end
 
--- Find all harvestable objects (SAFE VERSION)
+-- Find all harvestable objects
 local function findHarvestableObjects()
     statusLabel.Text = "Status: Scanning for harvestable objects..."
     harvestableObjects = {}
@@ -303,18 +310,14 @@ local function findHarvestableObjects()
     
     -- Safe iteration through islands
     for _, island in ipairs(islands:GetChildren()) do
-        if not island:IsA("BasePart") then -- Skip parts
+        if not island:IsA("BasePart") then
             local blocks = island:FindFirstChild("Blocks")
             if blocks then
-                -- Safe iteration through blocks
                 for _, block in ipairs(blocks:GetChildren()) do
-                    -- Skip non-models and non-parts
                     if block:IsA("BasePart") or block:IsA("Model") then
-                        -- SAFE: Convert name to string properly
                         local blockName = safeToString(block.Name)
                         local lowerName = safeLower(blockName)
                         
-                        -- Check various harvestable types
                         local isHarvestable = false
                         local harvestType = "unknown"
                         
@@ -323,29 +326,20 @@ local function findHarvestableObjects()
                             isHarvestable = true
                             harvestType = "berry"
                         elseif lowerName:find("crop") or lowerName:find("wheat") or 
-                               lowerName:find("carrot") or lowerName:find("potato") or
-                               lowerName:find("tomato") or lowerName:find("pumpkin") then
+                               lowerName:find("carrot") or lowerName:find("potato") then
                             isHarvestable = true
                             harvestType = "crop"
-                        elseif lowerName:find("tree") or lowerName:find("wood") or lowerName:find("log") then
+                        elseif lowerName:find("tree") or lowerName:find("wood") then
                             isHarvestable = true
                             harvestType = "tree"
                         end
                         
-                        -- Also check if it has Health (indicates harvestable block)
                         if not isHarvestable and block:FindFirstChild("Health") then
                             isHarvestable = true
                             harvestType = "block"
                         end
                         
-                        -- Check for harvestable attribute
-                        if not isHarvestable and block:GetAttribute("Harvestable") then
-                            isHarvestable = true
-                            harvestType = "attribute"
-                        end
-                        
                         if isHarvestable then
-                            -- SAFE: Get position
                             local position = getBlockPosition(block)
                             local distance = getDistance(playerPos, position)
                             
@@ -400,16 +394,15 @@ local function harvestObject(obj)
     end
     
     local player = game:GetService("Players").LocalPlayer
-    local netManaged = getNetManaged()
+    local remote = findHarvestRemote()
     
-    if not netManaged then
-        statusLabel.Text = "Status: Cannot find NetManaged!"
+    if not remote then
+        statusLabel.Text = "Status: Cannot find harvest remote!"
         return false
     end
     
-    local remote = netManaged:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST")
-    if not remote then
-        statusLabel.Text = "Status: Cannot find harvest remote!"
+    if remote.ClassName ~= "RemoteFunction" then
+        statusLabel.Text = "Status: Remote is not a RemoteFunction! It's a " .. remote.ClassName
         return false
     end
     
@@ -428,7 +421,7 @@ local function harvestObject(obj)
         print("Harvested:", obj.name, "Distance:", obj.distance)
         return true
     else
-        statusLabel.Text = "Status: ✗ Failed to harvest " .. obj.name
+        statusLabel.Text = "Status: ✗ Failed to harvest " .. obj.name .. " - " .. tostring(result)
         warn("Harvest failed:", result)
         return false
     end
@@ -450,7 +443,7 @@ local function harvestClosest()
         return
     end
     
-    -- Update distances to current position
+    -- Update distances
     local player = game:GetService("Players").LocalPlayer
     local character = player.Character
     local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
@@ -461,7 +454,6 @@ local function harvestClosest()
         end
     end
     
-    -- Re-sort by current distance
     table.sort(harvestableObjects, function(a, b) 
         return a.distance < b.distance 
     end)
@@ -474,7 +466,7 @@ local function harvestClosest()
     end
 end
 
--- Harvest all objects (closest first with 0.01s wait)
+-- Harvest all objects
 local function harvestAll()
     if #harvestableObjects == 0 then
         findHarvestableObjects()
@@ -515,13 +507,11 @@ local function harvestAll()
             if harvestObject(obj) then
                 successCount = successCount + 1
             end
-            task.wait(0.01) -- 0.01 second wait
+            task.wait(0.01)
         end
     end
     
     statusLabel.Text = string.format("Status: Complete! Harvested %d/%d objects", successCount, #harvestableObjects)
-    
-    -- Refresh the list
     task.wait(1)
     findHarvestableObjects()
 end
@@ -531,7 +521,6 @@ local function resetCapturedHash()
     capturedHash = nil
     hashLabel.Text = "Captured Hash: None (manually harvest a crop)"
     statusLabel.Text = "Status: Hash reset. Manually harvest a crop to capture new hash."
-    print("Hash reset - waiting for manual harvest")
 end
 
 -- Button connections
@@ -581,22 +570,15 @@ if hookSuccess then
     print("==========================")
 else
     statusLabel.Text = "Status: Failed to install hook - " .. tostring(hookError)
-    print("Failed to install hook:", hookError)
 end
 
 -- Find initial objects
 findHarvestableObjects()
 
--- Keep refreshing periodically with error handling
+-- Periodic refresh
 task.spawn(function()
     while true do
         task.wait(30)
-        local success, err = pcall(findHarvestableObjects)
-        if not success then
-            warn("Refresh failed:", err)
-        end
-        if capturedHash then
-            print("Hash still active - ready to harvest")
-        end
+        pcall(findHarvestableObjects)
     end
 end)
