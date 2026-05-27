@@ -1,12 +1,20 @@
+-- Complete Harvest Tool - Captures offset from manual harvest, then auto harvests closest bushes within 40 studs
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
 -- Create GUI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "HarvestTool"
-screenGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 -- Main Frame
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 500, 0, 500)
-mainFrame.Position = UDim2.new(0.5, -250, 0.5, -250)
+mainFrame.Size = UDim2.new(0, 400, 0, 350)
+mainFrame.Position = UDim2.new(0.5, -200, 0.5, -175)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BackgroundTransparency = 0.1
 mainFrame.BorderSizePixel = 0
@@ -19,7 +27,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 30)
 title.Position = UDim2.new(0, 0, 0, 0)
 title.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-title.Text = "Harvest Tool - Manual Hash Learning"
+title.Text = "Harvest Tool"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.SourceSansBold
 title.TextSize = 18
@@ -27,270 +35,222 @@ title.Parent = mainFrame
 
 -- Instructions
 local instructions = Instance.new("TextLabel")
-instructions.Size = UDim2.new(1, -20, 0, 60)
+instructions.Size = UDim2.new(1, -20, 0, 50)
 instructions.Position = UDim2.new(0, 10, 0, 35)
 instructions.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 instructions.TextColor3 = Color3.fromRGB(255, 200, 100)
 instructions.Font = Enum.Font.SourceSans
-instructions.TextSize = 12
-instructions.Text = "INSTRUCTIONS:\n1. Click 'Start Learning' and manually harvest ONE crop\n2. Script will capture the hash/offset used\n3. Then use 'Harvest Closest' or 'Harvest All'"
+instructions.TextSize = 11
+instructions.Text = "1. Click 'START CAPTURE' then manually harvest a berry bush\n2. Script will capture the offset\n3. Click 'Harvest Closest' to auto harvest bushes within 40 studs"
 instructions.TextWrapped = true
 instructions.TextXAlignment = Enum.TextXAlignment.Left
 instructions.Parent = mainFrame
 
--- Status Label
+-- Status
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -20, 0, 40)
-statusLabel.Position = UDim2.new(0, 10, 0, 100)
+statusLabel.Size = UDim2.new(1, -20, 0, 35)
+statusLabel.Position = UDim2.new(0, 10, 0, 90)
 statusLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 statusLabel.Font = Enum.Font.SourceSans
-statusLabel.TextSize = 14
+statusLabel.TextSize = 12
 statusLabel.Text = "Status: Idle"
-statusLabel.TextWrapped = true
 statusLabel.Parent = mainFrame
 
--- Captured Hash Display
-local hashLabel = Instance.new("TextLabel")
-hashLabel.Size = UDim2.new(1, -20, 0, 60)
-hashLabel.Position = UDim2.new(0, 10, 0, 145)
-hashLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-hashLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-hashLabel.Font = Enum.Font.SourceSans
-hashLabel.TextSize = 11
-hashLabel.Text = "Captured Hash: None"
-hashLabel.TextWrapped = true
-hashLabel.TextXAlignment = Enum.TextXAlignment.Left
-hashLabel.Parent = mainFrame
+-- Offset Display
+local offsetDisplay = Instance.new("TextLabel")
+offsetDisplay.Size = UDim2.new(1, -20, 0, 60)
+offsetDisplay.Position = UDim2.new(0, 10, 0, 130)
+offsetDisplay.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+offsetDisplay.TextColor3 = Color3.fromRGB(100, 255, 100)
+offsetDisplay.Font = Enum.Font.SourceSans
+offsetDisplay.TextSize = 10
+offsetDisplay.Text = "Captured Offset: None\nClick START CAPTURE then manually harvest"
+offsetDisplay.TextWrapped = true
+offsetDisplay.TextXAlignment = Enum.TextXAlignment.Left
+offsetDisplay.Parent = mainFrame
 
--- List Box for harvestable objects
-local listBox = Instance.new("TextBox")
-listBox.Size = UDim2.new(1, -20, 0, 120)
-listBox.Position = UDim2.new(0, 10, 0, 215)
-listBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-listBox.TextColor3 = Color3.fromRGB(200, 200, 200)
-listBox.Font = Enum.Font.SourceSans
-listBox.TextSize = 11
-listBox.Text = "Finding harvestable objects..."
-listBox.TextWrapped = true
-listBox.TextXAlignment = Enum.TextXAlignment.Left
-listBox.TextYAlignment = Enum.TextYAlignment.Top
-listBox.ClearTextOnFocus = false
-listBox.Parent = mainFrame
+-- Bush Count
+local bushCountLabel = Instance.new("TextLabel")
+bushCountLabel.Size = UDim2.new(1, -20, 0, 25)
+bushCountLabel.Position = UDim2.new(0, 10, 0, 195)
+bushCountLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+bushCountLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+bushCountLabel.Font = Enum.Font.SourceSans
+bushCountLabel.TextSize = 12
+bushCountLabel.Text = "Bushes found: 0"
+bushCountLabel.Parent = mainFrame
 
--- Button Frame
-local buttonFrame = Instance.new("Frame")
-buttonFrame.Size = UDim2.new(1, 0, 0, 100)
-buttonFrame.Position = UDim2.new(0, 0, 0, 345)
-buttonFrame.BackgroundTransparency = 1
-buttonFrame.Parent = mainFrame
+-- Buttons
+local captureButton = Instance.new("TextButton")
+captureButton.Size = UDim2.new(0, 180, 0, 35)
+captureButton.Position = UDim2.new(0, 10, 0, 230)
+captureButton.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+captureButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+captureButton.Font = Enum.Font.SourceSansBold
+captureButton.TextSize = 14
+captureButton.Text = "START CAPTURE"
+captureButton.Parent = mainFrame
 
--- Start Learning Button
-local learnButton = Instance.new("TextButton")
-learnButton.Size = UDim2.new(0, 150, 0, 35)
-learnButton.Position = UDim2.new(0, 10, 0, 5)
-learnButton.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-learnButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-learnButton.Font = Enum.Font.SourceSansBold
-learnButton.TextSize = 14
-learnButton.Text = "Start Learning"
-learnButton.Parent = buttonFrame
+local harvestButton = Instance.new("TextButton")
+harvestButton.Size = UDim2.new(0, 180, 0, 35)
+harvestButton.Position = UDim2.new(0, 200, 0, 230)
+harvestButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+harvestButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+harvestButton.Font = Enum.Font.SourceSansBold
+harvestButton.TextSize = 14
+harvestButton.Text = "Harvest Closest (40 studs)"
+harvestButton.Parent = mainFrame
 
--- Find All Button
-local findButton = Instance.new("TextButton")
-findButton.Size = UDim2.new(0, 120, 0, 35)
-findButton.Position = UDim2.new(0, 170, 0, 5)
-findButton.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
-findButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-findButton.Font = Enum.Font.SourceSansBold
-findButton.TextSize = 14
-findButton.Text = "Find All"
-findButton.Parent = buttonFrame
+local resetButton = Instance.new("TextButton")
+resetButton.Size = UDim2.new(0, 370, 0, 35)
+resetButton.Position = UDim2.new(0, 10, 0, 275)
+resetButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+resetButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+resetButton.Font = Enum.Font.SourceSansBold
+resetButton.TextSize = 14
+resetButton.Text = "Reset Captured Offset"
+resetButton.Parent = mainFrame
 
--- Harvest Closest Button
-local harvestClosestButton = Instance.new("TextButton")
-harvestClosestButton.Size = UDim2.new(0, 150, 0, 35)
-harvestClosestButton.Position = UDim2.new(0, 10, 0, 50)
-harvestClosestButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-harvestClosestButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-harvestClosestButton.Font = Enum.Font.SourceSansBold
-harvestClosestButton.TextSize = 14
-harvestClosestButton.Text = "Harvest Closest"
-harvestClosestButton.Parent = buttonFrame
-
--- Harvest All Button
-local harvestAllButton = Instance.new("TextButton")
-harvestAllButton.Size = UDim2.new(0, 150, 0, 35)
-harvestAllButton.Position = UDim2.new(0, 170, 0, 50)
-harvestAllButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-harvestAllButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-harvestAllButton.Font = Enum.Font.SourceSansBold
-harvestAllButton.TextSize = 14
-harvestAllButton.Text = "Harvest All"
-harvestAllButton.Parent = buttonFrame
+local refreshButton = Instance.new("TextButton")
+refreshButton.Size = UDim2.new(0, 370, 0, 30)
+refreshButton.Position = UDim2.new(0, 10, 0, 315)
+refreshButton.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
+refreshButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshButton.Font = Enum.Font.SourceSans
+refreshButton.TextSize = 12
+refreshButton.Text = "Refresh Bush List"
+refreshButton.Parent = mainFrame
 
 -- Variables
-local harvestableObjects = {}
-local capturedHash = nil
-local isLearning = false
+local capturedOffset = nil
+local isCapturing = false
 local harvestRemote = nil
-local originalRemote = nil
+local originalInvoke = nil
+
+-- Safe string function
+local function safeString(value)
+    if value == nil then return "" end
+    return tostring(value)
+end
 
 -- Find the harvest remote
 local function findHarvestRemote()
-    local replicatedStorage = game:GetService("ReplicatedStorage")
-    local possiblePaths = {
-        "rbxts_include.node_modules[@rbxts].net.out._NetManaged.CLIENT_HARVEST_CROP_REQUEST",
-        "rbxts_include.node_modules.@rbxts.net.out._NetManaged.CLIENT_HARVEST_CROP_REQUEST",
-        "CLIENT_HARVEST_CROP_REQUEST"
-    }
-    
-    for _, path in ipairs(possiblePaths) do
-        local remote = replicatedStorage:FindFirstChild(path)
-        if remote then
-            return remote
-        end
-    end
-    
-    -- Search recursively
-    local function searchRecursive(parent, searchName)
-        for _, child in ipairs(parent:GetChildren()) do
-            if child.Name == searchName then
-                return child
-            end
-            if child:IsA("Folder") or child:IsA("ModuleScript") then
-                local found = searchRecursive(child, searchName)
-                if found then return found end
-            end
-        end
-        return nil
-    end
-    
-    return searchRecursive(replicatedStorage, "CLIENT_HARVEST_CROP_REQUEST")
-end
-
--- Hook into the remote to capture the hash when you manually harvest
-local function hookRemoteForLearning()
-    harvestRemote = findHarvestRemote()
-    
-    if not harvestRemote then
-        statusLabel.Text = "Status: ERROR - Cannot find harvest remote!"
-        return false
-    end
-    
-    if not isLearning then
-        -- Store original InvokeServer function
-        originalRemote = harvestRemote.InvokeServer
-        
-        -- Hook the remote
-        harvestRemote.InvokeServer = function(self, ...)
-            local args = {...}
-            local argTable = args[1]
-            
-            -- Capture the hash/offset
-            if argTable and argTable["dZnpyRtxna"] then
-                capturedHash = argTable["dZnpyRtxna"]
-                hashLabel.Text = "Captured Hash: " .. capturedHash:gsub("[%z%c]", "\\x%02X"):sub(1, 100)
-                statusLabel.Text = "Status: ✓ Hash captured successfully! Ready to auto-harvest."
-                isLearning = false
-                
-                -- Unhook after capturing
-                if originalRemote then
-                    harvestRemote.InvokeServer = originalRemote
+    local rs = ReplicatedStorage
+    local path = rs:FindFirstChild("rbxts_include")
+    if path then
+        path = path:FindFirstChild("node_modules")
+        if path then
+            path = path:FindFirstChild("@rbxts")
+            if path then
+                path = path:FindFirstChild("net")
+                if path then
+                    path = path:FindFirstChild("out")
+                    if path then
+                        path = path:FindFirstChild("_NetManaged")
+                        if path then
+                            local remote = path:FindFirstChild("CLIENT_HARVEST_CROP_REQUEST")
+                            if remote then return remote end
+                        end
+                    end
                 end
-                
-                -- Play success sound
-                        statusLabel.Text = "Status: Hash captured! You can now use auto harvest."
             end
-            
-            -- Call original function
-            return originalRemote(self, ...)
         end
-        
-        return true
     end
-    return false
+    return nil
 end
 
--- Reset/Unhook the remote
-local function unhookRemote()
-    if harvestRemote and originalRemote then
-        harvestRemote.InvokeServer = originalRemote
-        originalRemote = nil
-    end
-    isLearning = false
-end
-
--- Start learning mode
-local function startLearning()
-    if isLearning then
-        statusLabel.Text = "Status: Already learning! Manually harvest a crop."
+-- Start capture mode - hooks the remote to grab the offset when you manually harvest
+local function startCapture()
+    if isCapturing then
+        statusLabel.Text = "Status: Already in capture mode! Go harvest a bush."
         return
     end
     
-    unhookRemote()
-    
-    if hookRemoteForLearning() then
-        isLearning = true
-        statusLabel.Text = "Status: LEARNING MODE ACTIVE - Now manually harvest ONE crop!"
-        hashLabel.Text = "Captured Hash: Waiting for manual harvest..."
-        print("Learning mode active! Go manually harvest a crop to capture the hash.")
-    else
-        statusLabel.Text = "Status: Failed to hook remote! Check if game is loaded."
+    harvestRemote = findHarvestRemote()
+    if not harvestRemote then
+        statusLabel.Text = "Status: ERROR - Cannot find harvest remote!"
+        return
     end
-end
-
--- Calculate distance
-local function getDistance(pos1, pos2)
-    return (pos1 - pos2).Magnitude
-end
-
--- Find all harvestable objects
-local function findHarvestableObjects()
-    statusLabel.Text = "Status: Scanning for harvestable objects..."
-    harvestableObjects = {}
     
-    local player = game:GetService("Players").LocalPlayer
-    local character = player.Character
+    -- Save original function
+    originalInvoke = harvestRemote.InvokeServer
+    
+    -- Hook the remote
+    harvestRemote.InvokeServer = function(self, data)
+        -- Capture the offset from the manual harvest
+        if data and data["dZnpyRtxna"] then
+            capturedOffset = data["dZnpyRtxna"]
+            
+            -- Show the captured offset
+            local display = capturedOffset:gsub("[%z%c]", function(c)
+                return string.format("\\x%02X", string.byte(c))
+            end)
+            offsetDisplay.Text = "Captured Offset: " .. display:sub(1, 80) .. "\n✓ Ready to auto harvest!"
+            statusLabel.Text = "Status: ✓ OFFSET CAPTURED! You can now auto harvest."
+            
+            isCapturing = false
+            
+            -- Restore original function
+            harvestRemote.InvokeServer = originalInvoke
+            
+            print("=== OFFSET CAPTURED ===")
+            print("Offset:", capturedOffset)
+            print("======================")
+        end
+        
+        -- Call original
+        return originalInvoke(self, data)
+    end
+    
+    isCapturing = true
+    statusLabel.Text = "Status: CAPTURE MODE - Manually harvest a berry bush NOW!"
+    offsetDisplay.Text = "Captured Offset: WAITING...\nGo manually harvest a berry bush!"
+end
+
+-- Reset captured offset
+local function resetOffset()
+    capturedOffset = nil
+    if isCapturing and harvestRemote and originalInvoke then
+        harvestRemote.InvokeServer = originalInvoke
+    end
+    isCapturing = false
+    offsetDisplay.Text = "Captured Offset: None\nClick START CAPTURE then manually harvest"
+    statusLabel.Text = "Status: Offset reset. Click START CAPTURE to capture new offset."
+end
+
+-- Find all berry bushes (FIXED - no number errors)
+local function findAllBushes()
+    local bushes = {}
+    local character = LocalPlayer.Character
     local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
     
-    -- Scan islands
-    for _, island in pairs(workspace.Islands:GetChildren()) do
+    for _, island in pairs(Workspace.Islands:GetChildren()) do
         local blocks = island:FindFirstChild("Blocks")
         if blocks then
-            for blockName, block in pairs(blocks:GetChildren()) do
-                -- Check if it's a harvestable crop/bush/tree
-                local isHarvestable = false
-                local harvestType = "unknown"
+            for _, block in pairs(blocks:GetChildren()) do
+                local blockName = safeString(block.Name)
+                local lowerName = blockName:lower()
                 
-                if blockName:lower():find("berry") or blockName:lower():find("bush") then
-                    isHarvestable = true
-                    harvestType = "berry"
-                elseif blockName:lower():find("crop") or blockName:lower():find("wheat") or blockName:lower():find("carrot") or blockName:lower():find("potato") then
-                    isHarvestable = true
-                    harvestType = "crop"
-                elseif blockName:lower():find("tree") or blockName:lower():find("wood") then
-                    isHarvestable = true
-                    harvestType = "tree"
-                elseif block:IsA("Model") and (block:FindFirstChild("Harvestable") or block:GetAttribute("isHarvestable")) then
-                    isHarvestable = true
-                    harvestType = "other"
-                end
-                
-                if isHarvestable then
-                    local position = block:IsA("BasePart") and block.Position or 
-                                   (block:FindFirstChild("Position") and block.Position.Position) or
-                                   Vector3.new(0, 0, 0)
+                -- Check for berry bushes
+                if lowerName:find("berry") or lowerName:find("bush") then
+                    -- Get position safely
+                    local blockPos = nil
+                    if block:IsA("BasePart") then
+                        blockPos = block.Position
+                    elseif block:FindFirstChild("Position") and block.Position:IsA("BasePart") then
+                        blockPos = block.Position.Position
+                    else
+                        blockPos = Vector3.new(0, 0, 0)
+                    end
                     
-                    local distance = getDistance(playerPos, position)
+                    local distance = (playerPos - blockPos).Magnitude
                     
-                    table.insert(harvestableObjects, {
+                    table.insert(bushes, {
+                        bush = block,
                         name = blockName,
-                        model = block,
-                        island = island,
-                        position = position,
-                        distance = distance,
-                        type = harvestType
+                        position = blockPos,
+                        distance = distance
                     })
                 end
             end
@@ -298,189 +258,131 @@ local function findHarvestableObjects()
     end
     
     -- Sort by distance
-    table.sort(harvestableObjects, function(a, b) return a.distance < b.distance end)
+    table.sort(bushes, function(a, b) return a.distance < b.distance end)
     
-    -- Update display
-    local listText = "Found " .. #harvestableObjects .. " objects (sorted by distance):\n\n"
-    for i, obj in ipairs(harvestableObjects) do
-        listText = listText .. string.format("%d. %s [%s] - %.1f studs\n", i, obj.name, obj.type, obj.distance)
-        if i >= 30 then
-            listText = listText .. "... and " .. (#harvestableObjects - 30) .. " more"
-            break
+    return bushes
+end
+
+-- Refresh and display bush list
+local function refreshBushList()
+    local bushes = findAllBushes()
+    local closeCount = 0
+    
+    for _, bush in ipairs(bushes) do
+        if bush.distance <= 40 then
+            closeCount = closeCount + 1
         end
     end
     
-    listBox.Text = listText
-    statusLabel.Text = "Status: Found " .. #harvestableObjects .. " harvestable objects"
+    bushCountLabel.Text = string.format("Bushes found: %d total, %d within 40 studs", #bushes, closeCount)
     
-    if #harvestableObjects == 0 then
-        listBox.Text = "No harvestable objects found!\n\nMake sure you're near crops/berry bushes."
+    if #bushes > 0 then
+        statusLabel.Text = string.format("Status: Found %d bushes. Closest: %s (%.0f studs)", 
+            #bushes, bushes[1].name, bushes[1].distance)
+    else
+        statusLabel.Text = "Status: No berry bushes found nearby!"
     end
+    
+    return bushes
 end
 
--- Harvest a specific object
-local function harvestObject(obj)
-    if not obj or not obj.model then
-        statusLabel.Text = "Status: Invalid object!"
+-- Harvest a specific bush
+local function harvestBush(bushData)
+    if not capturedOffset then
+        statusLabel.Text = "Status: No offset! Click START CAPTURE and manually harvest first!"
         return false
     end
     
-    if not capturedHash then
-        statusLabel.Text = "Status: No hash captured! Click 'Start Learning' and manually harvest first."
-        return false
-    end
-    
-    local player = game:GetService("Players").LocalPlayer
     local remote = findHarvestRemote()
-    
     if not remote then
         statusLabel.Text = "Status: Cannot find harvest remote!"
         return false
     end
     
-    statusLabel.Text = "Status: Harvesting " .. obj.name
+    statusLabel.Text = "Status: Harvesting " .. bushData.name .. " (" .. string.format("%.0f", bushData.distance) .. " studs)"
     
-    local success, result = pcall(function()
+    local success, err = pcall(function()
         return remote:InvokeServer({
-            ["dZnpyRtxna"] = capturedHash,
-            ["player"] = player,
-            ["model"] = obj.model,
+            ["dZnpyRtxna"] = capturedOffset,
+            ["player"] = LocalPlayer,
+            ["model"] = bushData.bush,
         })
     end)
     
     if success then
-        statusLabel.Text = "Status: ✓ Harvested " .. obj.name
-        print("Harvested:", obj.name, "at distance:", obj.distance)
+        statusLabel.Text = "Status: ✓ Harvested " .. bushData.name
         return true
     else
-        statusLabel.Text = "Status: ✗ Failed to harvest " .. obj.name
-        warn("Harvest failed:", result)
+        statusLabel.Text = "Status: Failed - " .. safeString(err):sub(1, 50)
         return false
     end
 end
 
--- Harvest closest object
+-- Harvest closest bush within 40 studs
 local function harvestClosest()
-    if #harvestableObjects == 0 then
-        findHarvestableObjects()
-    end
-    
-    if #harvestableObjects == 0 then
-        statusLabel.Text = "Status: No objects to harvest!"
+    if not capturedOffset then
+        statusLabel.Text = "Status: No offset! Click START CAPTURE and manually harvest first!"
         return
     end
     
-    if not capturedHash then
-        statusLabel.Text = "Status: No hash! Click 'Start Learning' and manually harvest first."
+    local bushes = findAllBushes()
+    
+    if #bushes == 0 then
+        statusLabel.Text = "Status: No berry bushes found!"
         return
     end
     
-    -- Update distances
-    local player = game:GetService("Players").LocalPlayer
-    local character = player.Character
-    local playerPos = character and character.PrimaryPart and character.PrimaryPart.Position or Vector3.new(0, 0, 0)
-    
-    for _, obj in ipairs(harvestableObjects) do
-        if obj.model and obj.model:IsDescendantOf(workspace) then
-            obj.distance = getDistance(playerPos, obj.position)
+    -- Find first bush within 40 studs
+    local targetBush = nil
+    for _, bush in ipairs(bushes) do
+        if bush.distance <= 40 then
+            targetBush = bush
+            break
         end
     end
     
-    table.sort(harvestableObjects, function(a, b) return a.distance < b.distance end)
-    
-    local closest = harvestableObjects[1]
-    if closest then
-        harvestObject(closest)
+    if targetBush then
+        harvestBush(targetBush)
+        task.wait(0.5)
+        refreshBushList() -- Refresh after harvest
     else
-        statusLabel.Text = "Status: No valid objects nearby!"
+        statusLabel.Text = string.format("Status: No bushes within 40 studs! Closest is %.0f studs away.", bushes[1].distance)
     end
-end
-
--- Harvest all objects
-local function harvestAll()
-    if #harvestableObjects == 0 then
-        findHarvestableObjects()
-    end
-    
-    if #harvestableObjects == 0 then
-        statusLabel.Text = "Status: No objects to harvest!"
-        return
-    end
-    
-    if not capturedHash then
-        statusLabel.Text = "Status: No hash! Click 'Start Learning' and manually harvest first."
-        return
-    end
-    
-    statusLabel.Text = "Status: Harvesting all " .. #harvestableObjects .. " objects..."
-    
-    local successCount = 0
-    for i, obj in ipairs(harvestableObjects) do
-        if obj.model and obj.model:IsDescendantOf(workspace) then
-            if harvestObject(obj) then
-                successCount = successCount + 1
-            end
-            task.wait(0.01) -- 0.01 second wait
-        end
-    end
-    
-    statusLabel.Text = string.format("Status: Complete! Harvested %d/%d objects", successCount, #harvestableObjects)
-    findHarvestableObjects() -- Refresh list
 end
 
 -- Button connections
-learnButton.MouseButton1Click:Connect(function()
-    task.spawn(startLearning)
-end)
-
-findButton.MouseButton1Click:Connect(function()
-    task.spawn(findHarvestableObjects)
-end)
-
-harvestClosestButton.MouseButton1Click:Connect(function()
-    task.spawn(harvestClosest)
-end)
-
-harvestAllButton.MouseButton1Click:Connect(function()
-    task.spawn(harvestAll)
-end)
+captureButton.MouseButton1Click:Connect(startCapture)
+harvestButton.MouseButton1Click:Connect(harvestClosest)
+resetButton.MouseButton1Click:Connect(resetOffset)
+refreshButton.MouseButton1Click:Connect(refreshBushList)
 
 -- Keyboard shortcuts
-local uis = game:GetService("UserInputService")
-uis.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.L then
-        startLearning()
-    elseif input.KeyCode == Enum.KeyCode.F then
-        findHarvestableObjects()
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.C then
+        startCapture()
     elseif input.KeyCode == Enum.KeyCode.H then
         harvestClosest()
-    elseif input.KeyCode == Enum.KeyCode.A then
-        harvestAll()
+    elseif input.KeyCode == Enum.KeyCode.R then
+        resetOffset()
+    elseif input.KeyCode == Enum.KeyCode.F then
+        refreshBushList()
     end
 end)
 
--- Cleanup on script end
-game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
-    unhookRemote()
-end)
-
 -- Initialize
-task.wait(1)
-findHarvestRemote()
-findHarvestableObjects()
-statusLabel.Text = "Status: Ready! Click 'Start Learning' and manually harvest a crop."
-hashLabel.Text = "Captured Hash: None (waiting for manual harvest)"
-
-print("=== Harvest Tool Loaded ===")
-print("Step 1: Click 'Start Learning'")
-print("Step 2: Manually harvest ONE crop")
-print("Step 3: Script will capture the hash")
-print("Step 4: Use 'Harvest Closest' or 'Harvest All'")
+print("========================================")
+print("HARVEST TOOL READY")
+print("STEP 1: Click 'START CAPTURE'")
+print("STEP 2: Manually harvest ONE berry bush")
+print("STEP 3: Script captures the offset")
+print("STEP 4: Click 'Harvest Closest' to auto harvest")
 print("")
 print("Keyboard Shortcuts:")
-print("L - Start Learning Mode")
-print("F - Find All Objects")
-print("H - Harvest Closest")
-print("A - Harvest All")
+print("C - Start Capture")
+print("H - Harvest Closest (within 40 studs)")
+print("R - Reset Offset")
+print("F - Refresh List")
+print("========================================")
+
+-- Initial refresh
+refreshBushList()
