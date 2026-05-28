@@ -1,4 +1,4 @@
--- Vending Scanner - Client Side Only (Using your script's method)
+-- Vending Scanner - For Executor (Synapse X, Krnl, ScriptWare, etc.)
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -10,7 +10,7 @@ end
 
 local playerName = player.Name
 
--- Your local server configuration
+-- Your local server IP and port
 local localIP = "192.168.0.76"
 local localPort = 3000
 local webhookURL = "http://" .. localIP .. ":" .. localPort .. "/api/vending"
@@ -183,7 +183,7 @@ local function collectVendingData()
     return allData
 end
 
--- Send data using the SAME METHOD as your script (with writefile and multipart)
+-- Send data using executor's request function (works for Synapse, Krnl, ScriptWare)
 local function sendToLocalServer(data)
     if not data or #data.islands == 0 then
         warn("No vending data found to send!")
@@ -192,55 +192,89 @@ local function sendToLocalServer(data)
     
     -- Convert data to JSON string
     local jsonString = HttpService:JSONEncode(data)
-    
-    -- Create filename with timestamp (like your script)
-    local fileName = playerName .. "_vending_" .. os.date("%Y-%m-%d_%H-%M-%S") .. ".json"
-    
-    -- Write file (like your script does)
-    if writefile then
-        writefile(fileName, jsonString)
-        print("✓ File saved: " .. fileName)
-    else
-        print("⚠️ writefile not available, continuing without saving")
-    end
-    
     local fileSize = #jsonString
-    print(string.format("📁 File size: %.2f KB", fileSize / 1024))
     
-    -- Create multipart form data (EXACTLY like your script)
-    local boundary = "------LuaBoundary" .. HttpService:GenerateGUID(false)
-    local body = "--" .. boundary .. "\r\n"
-        .. "Content-Disposition: form-data; name=\"file\"; filename=\"" .. fileName .. "\"\r\n"
-        .. "Content-Type: application/json\r\n\r\n"
-        .. jsonString .. "\r\n"
-        .. "--" .. boundary .. "--"
+    print(string.format("\n📦 JSON Size: %.2f KB", fileSize / 1024))
+    print("📡 Sending to local server...")
     
-    -- Send the request (EXACTLY like your script)
-    local success, response = pcall(function()
-        return request({
+    -- Try different request methods based on executor
+    local success = false
+    local responseText = ""
+    
+    -- Method 1: syn.request (Synapse X)
+    if syn and syn.request then
+        print("Using syn.request...")
+        local response = syn.request({
             Url = webhookURL,
             Method = "POST",
             Headers = {
-                ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
+                ["Content-Type"] = "application/json"
             },
-            Body = body,
+            Body = jsonString
         })
-    end)
-    
-    if success and response then
-        if response.StatusCode == 200 or response.StatusCode == 201 or response.StatusCode == 204 then
-            print("✓ Data successfully sent to local server!")
-            print("  Status Code: " .. response.StatusCode)
-            if response.Body then
-                print("  Response: " .. response.Body)
-            end
-            return true
-        else
-            warn("✗ Failed to send. Status Code: " .. response.StatusCode)
-            return false
+        if response and response.StatusCode and (response.StatusCode == 200 or response.StatusCode == 201) then
+            success = true
+            responseText = response.Body or ""
         end
+    end
+    
+    -- Method 2: request (Krnl, ScriptWare)
+    if not success and request then
+        print("Using request...")
+        local response = request({
+            Url = webhookURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = jsonString
+        })
+        if response and response.StatusCode and (response.StatusCode == 200 or response.StatusCode == 201) then
+            success = true
+            responseText = response.Body or ""
+        end
+    end
+    
+    -- Method 3: http_request (some executors)
+    if not success and http_request then
+        print("Using http_request...")
+        local response = http_request({
+            Url = webhookURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = jsonString
+        })
+        if response and response.StatusCode and (response.StatusCode == 200 or response.StatusCode == 201) then
+            success = true
+            responseText = response.Body or ""
+        end
+    end
+    
+    -- Method 4: HttpService (fallback)
+    if not success then
+        print("Using HttpService.PostAsync...")
+        local postSuccess, response = pcall(function()
+            return HttpService:PostAsync(webhookURL, jsonString, Enum.HttpContentType.ApplicationJson)
+        end)
+        if postSuccess then
+            success = true
+            responseText = response or ""
+        end
+    end
+    
+    if success then
+        print("✓ Data successfully sent to local server!")
+        print("  Response: " .. responseText)
+        return true
     else
-        warn("✗ Request failed: " .. tostring(response))
+        warn("✗ Failed to send to local server")
+        print("\nTroubleshooting:")
+        print("1. Make sure your local server is running: node server.js")
+        print("2. Check if " .. localIP .. " is your correct IP")
+        print("3. Try using http://127.0.0.1:3000/api/vending instead")
+        print("4. Check Windows Firewall - allow port 3000")
         return false
     end
 end
@@ -308,8 +342,6 @@ if vendingData and #vendingData.islands > 0 then
         print("\n✅ SUCCESS: Data sent to http://" .. localIP .. ":" .. localPort)
     else
         print("\n❌ FAILED: Could not send to local server")
-        print("\nMake sure your local server is running at: http://" .. localIP .. ":" .. localPort)
-        print("Run this command in terminal: node server.js")
     end
 else
     print("\n❌ No vending machines found in any island!")
