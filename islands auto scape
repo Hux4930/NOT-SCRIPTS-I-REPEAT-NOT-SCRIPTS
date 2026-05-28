@@ -1,4 +1,4 @@
--- Vending Scanner - Send JSON to Local Server
+-- Vending Scanner - Send JSON to Local Server (Fixed)
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -10,10 +10,21 @@ end
 
 local playerName = player.Name
 
--- Local server configuration (change these to match your local server)
-local localServerURL = "http://localhost:3000/api/vending"  -- Change port as needed
--- Alternative: http://127.0.0.1:3000/api/vending
--- Or use your local IP: http://192.168.1.100:3000/api/vending
+-- Local server configuration - USE YOUR LOCAL IP ADDRESS INSTEAD OF LOCALHOST
+-- Find your local IP: Open Command Prompt and type "ipconfig" (Windows) or "ifconfig" (Mac/Linux)
+-- Look for IPv4 Address (e.g., 192.168.1.100)
+local localIP = "127.0.0.1"  -- Change this to your actual local IP (e.g., "192.168.1.100")
+local localPort = 3000
+local localServerURL = "http://" .. localIP .. ":" .. localPort .. "/api/vending"
+
+print("📡 Local Server URL: " .. localServerURL)
+
+-- Alternative URLs to try
+local alternativeURLs = {
+    "http://localhost:3000/api/vending",
+    "http://127.0.0.1:3000/api/vending",
+    "http://" .. localIP .. ":3000/api/vending",
+}
 
 -- Function to check if player has the specific image ID in their RoactTree
 local function checkForOwnerImage()
@@ -183,88 +194,114 @@ local function collectVendingData()
     return allData
 end
 
--- Send JSON data to local server
+-- Method 1: Using syn.request (for Synapse X)
+local function sendWithSynRequest(url, data)
+    if syn and syn.request then
+        local success, response = pcall(function()
+            return syn.request({
+                Url = url,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+        return success, response
+    end
+    return false, nil
+end
+
+-- Method 2: Using request (for ScriptWare, Krnl, etc.)
+local function sendWithRequest(url, data)
+    if request then
+        local success, response = pcall(function()
+            return request({
+                Url = url,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+        return success, response
+    end
+    return false, nil
+end
+
+-- Method 3: Using HttpService (for regular Roblox)
+local function sendWithHttpService(url, data)
+    local success, response = pcall(function()
+        return HttpService:PostAsync(url, HttpService:JSONEncode(data), Enum.HttpContentType.ApplicationJson)
+    end)
+    return success, response
+end
+
+-- Method 4: Save to file first (best for local servers)
+local function sendViaFileWrite(data)
+    if not writefile then
+        return false, "writefile not available"
+    end
+    
+    local jsonString = HttpService:JSONEncode(data)
+    local fileName = "vending_data_temp.json"
+    
+    -- Write to file
+    writefile(fileName, jsonString)
+    print("✓ Data saved to file: " .. fileName)
+    
+    -- If you have a local program watching for this file, it can read it
+    return true, "File saved"
+end
+
+-- Try to send to local server using all available methods
 local function sendToLocalServer(data)
     if not data or #data.islands == 0 then
         warn("No vending data found to send!")
         return false
     end
     
-    -- Convert data to JSON string
     local jsonString = HttpService:JSONEncode(data)
     local fileSize = #jsonString
     
     print(string.format("\n📦 JSON Size: %.2f KB", fileSize / 1024))
-    print("📡 Sending to local server: " .. localServerURL)
+    print("📡 Attempting to send to local server...")
     
-    -- Try multiple methods to send data
-    
-    -- Method 1: Using request() (works in most cases)
-    local success, response = pcall(function()
-        return request({
-            Url = localServerURL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["Content-Length"] = tostring(fileSize)
-            },
-            Body = jsonString
-        })
-    end)
-    
-    if success and response then
-        if response.StatusCode == 200 or response.StatusCode == 201 or response.StatusCode == 204 then
-            print("✓ Data successfully sent to local server!")
-            print("  Response: " .. (response.Body or "OK"))
-            return true
-        else
-            warn("✗ Server returned status code: " .. tostring(response.StatusCode))
-            warn("  Response: " .. tostring(response.Body))
-            return false
-        end
-    end
-    
-    -- Method 2: Try using HttpService:PostAsync (fallback)
-    print("\n🔄 Trying alternative method (PostAsync)...")
-    local postSuccess, postResponse = pcall(function()
-        return HttpService:PostAsync(localServerURL, jsonString, Enum.HttpContentType.ApplicationJson)
-    end)
-    
-    if postSuccess then
-        print("✓ Data sent successfully via PostAsync!")
-        return true
-    else
-        warn("✗ Failed to send data: " .. tostring(postResponse))
-        return false
-    end
-end
-
--- Also save to a local file if writefile is available
-local function saveToLocalFile(data)
-    if not data or #data.islands == 0 then
-        return false
-    end
-    
-    local jsonString = HttpService:JSONEncode(data)
-    local fileName = string.format("vending_data_%s_%s.json", playerName, os.date("%Y-%m-%d_%H-%M-%S"))
-    
-    -- Check if writefile is available (Synapse X, Krnl, ScriptWare, etc.)
-    if writefile then
-        local success, err = pcall(function()
-            writefile(fileName, jsonString)
-        end)
+    -- Try each URL
+    for _, url in ipairs(alternativeURLs) do
+        print("\n🔄 Trying URL: " .. url)
         
-        if success then
-            print("✓ Data saved to local file: " .. fileName)
+        -- Try syn.request first
+        local success, response = sendWithSynRequest(url, data)
+        if success and response and (response.StatusCode == 200 or response.StatusCode == 201) then
+            print("✓ Successfully sent via syn.request!")
+            print("  Response: " .. tostring(response.Body))
             return true
-        else
-            warn("Failed to save file: " .. tostring(err))
-            return false
         end
-    else
-        print("⚠️ writefile not available - file not saved locally")
-        return false
+        
+        -- Try regular request
+        success, response = sendWithRequest(url, data)
+        if success and response and (response.StatusCode == 200 or response.StatusCode == 201) then
+            print("✓ Successfully sent via request!")
+            print("  Response: " .. tostring(response.Body))
+            return true
+        end
+        
+        -- Try HttpService
+        success, response = sendWithHttpService(url, data)
+        if success then
+            print("✓ Successfully sent via HttpService!")
+            return true
+        end
     end
+    
+    -- If all network methods fail, save to file
+    print("\n⚠️ Could not send to local server via HTTP")
+    print("💾 Saving to local file instead...")
+    sendViaFileWrite(data)
+    
+    return false
 end
 
 -- Print data summary to console
@@ -303,13 +340,30 @@ local function printSummary(data)
     print(string.rep("=", 60))
 end
 
+-- Also save the full JSON as a file
+local function saveFullJSON(data)
+    if not writefile then
+        return
+    end
+    
+    local jsonString = HttpService:JSONEncode(data)
+    local fileName = string.format("vending_data_%s_%s.json", playerName, os.date("%Y-%m-%d_%H-%M-%S"))
+    
+    local success, err = pcall(function()
+        writefile(fileName, jsonString)
+    end)
+    
+    if success then
+        print("\n💾 Full data saved to file: " .. fileName)
+    end
+end
+
 -- Main execution
 print("\n" .. string.rep("=", 60))
 print("      VENDING SCANNER - LOCAL SERVER MODE")
 print(string.rep("=", 60))
 print("Player: " .. playerName)
 print("Owner Status: " .. (isOwner and "OWNER" or "Regular Player"))
-print("Local Server URL: " .. localServerURL)
 print(string.rep("=", 60))
 
 -- Collect all vending data
@@ -317,26 +371,28 @@ local vendingData = collectVendingData()
 
 if vendingData and #vendingData.islands > 0 then
     print("\n" .. string.rep("-", 60))
-    print("SENDING JSON DATA TO LOCAL SERVER...")
+    print("PROCESSING VENDING DATA...")
     print(string.rep("-", 60))
     
     -- Print summary to console
     printSummary(vendingData)
     
-    -- Send to local server
-    local sent = sendToLocalServer(vendingData)
+    -- Save full JSON file
+    saveFullJSON(vendingData)
     
-    -- Also save to local file if possible
-    saveToLocalFile(vendingData)
+    -- Try to send to local server
+    local sent = sendToLocalServer(vendingData)
     
     if sent then
         print("\n✅ SUCCESS: JSON data sent to local server!")
     else
-        print("\n❌ FAILED: Could not send data to local server")
-        print("\nMake sure your local server is running:")
-        print("1. Start your local HTTP server on port 3000")
-        print("2. Ensure the endpoint '/api/vending' exists")
-        print("3. Check firewall settings if using network IP")
+        print("\n❌ COULD NOT REACH LOCAL SERVER")
+        print("\nTroubleshooting tips:")
+        print("1. Make sure your local server is running")
+        print("2. Try using your computer's IP address instead of localhost")
+        print("3. Check if Windows Firewall is blocking the connection")
+        print("4. Run this in an executor that supports HTTP requests")
+        print("\nThe data has been saved as a JSON file in your workspace")
     end
 else
     print("\n❌ No vending machines found in any island!")
