@@ -43,26 +43,18 @@ end
 -- Check for owner image
 local isOwner, ownerName = checkForOwnerImage()
 
--- Find the island
+-- SPECIFIC ISLAND ID
+local targetIslandId = "ed4d8eb5-f174-4e91-a76d-8c0cf8ed1873"
 local islandsContainer = workspace:FindFirstChild("Islands")
 if not islandsContainer then
     warn("No Islands folder found in workspace!")
     return
 end
 
-local targetIsland = nil
-local islandId = nil
-
-for _, island in ipairs(islandsContainer:GetChildren()) do
-    if island:FindFirstChild("Blocks") then
-        targetIsland = island
-        islandId = string.gsub(island.Name, "-island$", "")
-        break
-    end
-end
-
+-- Get the specific island
+local targetIsland = islandsContainer:FindFirstChild(targetIslandId .. "-island")
 if not targetIsland then
-    warn("No valid island found in workspace!")
+    warn("Target island not found: " .. targetIslandId)
     return
 end
 
@@ -70,7 +62,7 @@ local blocks = targetIsland:WaitForChild("Blocks")
 local results = {}
 local webhookURL = "https://discord.com/api/webhooks/1509639034350080081/jXVC5Ygd3LhuKE7-abZIsZ4oNlhdpK3DqTxCHAunfaeVQjD07hHMH_ulR9QGhNGo66Km"
 
-print("Found island:", targetIsland.Name, "| ID:", islandId)
+print("Found island:", targetIsland.Name, "| ID:", targetIslandId)
 print("Player:", playerName)
 print("Owner Status:", isOwner and "OWNER" or "Not Owner")
 
@@ -85,133 +77,162 @@ local function generateUUID()
     return uuid
 end
 
--- Check for buy vending at specific block
-local function checkBuyVending(block)
-    local sellingContents = block:FindFirstChild("SellingContents")
-    if sellingContents then
-        local vendingMachine = sellingContents:FindFirstChild("vendingMachine1")
-        if vendingMachine then
-            local amount = vendingMachine:FindFirstChild("Amount")
-            local displayName = vendingMachine:FindFirstChild("DisplayName")
-            if amount and displayName then
-                return true, amount.Value, displayName.Value
+-- Function to scan SellingContents and extract item info
+local function scanSellingContents(sellingContents)
+    if not sellingContents then
+        return nil, nil
+    end
+    
+    -- Loop through all folders inside SellingContents
+    for _, child in ipairs(sellingContents:GetChildren()) do
+        -- Check if it's a folder or model
+        if child:IsA("Folder") or child:IsA("Model") then
+            local folderName = child.Name  -- This IS the item name/crate name
+            local displayNameObj = child:FindFirstChild("DisplayName")
+            
+            -- Get the display name value if it exists
+            local displayName = nil
+            if displayNameObj then
+                displayName = displayNameObj.Value
             end
+            
+            -- Return: folderName (item name), displayName
+            return folderName, displayName
         end
     end
-    return false, nil, nil
+    
+    return nil, nil
 end
 
--- Scan all vending blocks
+-- Scan ALL blocks (specifically targeting block 9761)
 local blockIndex = 0
-local buyVendingFound = false
+local targetBlockIndex = 9761
+
+print("\n=== SCANNING BLOCKS ===")
+print("Looking for block index: " .. targetBlockIndex)
+print("Total blocks in island: " .. tostring(#blocks:GetChildren()))
 
 for _, block in ipairs(blocks:GetChildren()) do
     blockIndex = blockIndex + 1
-    local name = string.lower(block.Name or "")
     
-    -- Check for buy vending at index 2103
-    local isBuyVending = false
-    local buyAmount = nil
-    local buyDisplayName = nil
+    -- Check if this is block 9761 OR any vending block
+    local isTargetBlock = (blockIndex == targetBlockIndex)
     
-    if blockIndex == 2103 then
-        isBuyVending, buyAmount, buyDisplayName = checkBuyVending(block)
-        if isBuyVending then
-            buyVendingFound = true
-            print("✓ Found BUY vending at block 2103!")
-            print("  Item: " .. buyDisplayName)
-            print("  Amount: " .. buyAmount)
+    -- Get TransactionPrice (this is the price for both buy and sell)
+    local transactionPrice = block:FindFirstChild("TransactionPrice")
+    local priceValue = nil
+    if transactionPrice then
+        priceValue = transactionPrice.Value
+    end
+    
+    -- Get Mode (0 = Buy, 1 = Sell)
+    local mode = block:FindFirstChild("Mode")
+    local modeValue = nil
+    local vendingType = "UNKNOWN"
+    
+    if mode then
+        modeValue = mode.Value
+        if modeValue == 0 then
+            vendingType = "BUY"
+        elseif modeValue == 1 then
+            vendingType = "SELL"
         end
     end
     
-    -- Check for sell vending (contains "vending" in name)
-    if string.find(name, "vending") or isBuyVending then
+    -- Get SellingContents for item name
+    local sellingContents = block:FindFirstChild("SellingContents")
+    local itemName = nil
+    local displayName = nil
+    
+    if sellingContents then
+        itemName, displayName = scanSellingContents(sellingContents)
+    end
+    
+    -- If this is the target block OR it has vending data, collect it
+    if isTargetBlock or (priceValue and modeValue ~= nil) or (itemName) then
+        -- Use displayName if available, otherwise use folder name
+        local finalItemName = displayName or itemName or block.Name or "Unknown Item"
         
-        local transactionPrice = block:FindFirstChild("TransactionPrice")
-        local mode = block:FindFirstChild("Mode")
-        local sellingContents = block:FindFirstChild("SellingContents")
-        local displayName = nil
-        local priceValue = nil
-        local modeValue = nil
-        local vendingType = "UNKNOWN"
-        local itemName = nil
-        
-        -- Handle buy vending (block 2103)
-        if isBuyVending and blockIndex == 2103 then
-            itemName = buyDisplayName
-            priceValue = buyAmount
-            modeValue = "Buy"
-            vendingType = "BUY"
-            displayName = buyDisplayName
-        else
-            -- Handle sell vending (original method)
-            if transactionPrice then
-                priceValue = transactionPrice.Value
-            end
-            
-            if mode then
-                modeValue = mode.Value
-            end
-            
-            -- Get item name from crateMetalPineapple
-            if sellingContents then
-                local crate = sellingContents:FindFirstChild("crateMetalPineapple")
-                if crate and crate:FindFirstChild("DisplayName") then
-                    itemName = crate.DisplayName.Value
-                    displayName = crate.DisplayName.Value
-                    vendingType = "SELL"
-                end
-            end
-        end
-        
-        -- Add to results with item name
+        -- Add to results
         table.insert(results, {
             blockIndex = blockIndex,
             blockName = block.Name,
             vendingType = vendingType,
-            itemName = itemName or displayName or "Unknown Item",
+            modeValue = modeValue,
+            itemName = finalItemName,
+            folderName = itemName,
             price = priceValue,
-            mode = modeValue or (vendingType == "BUY" and "Buy" or "Unknown"),
-            isSpecialBuyBlock = (blockIndex == 2103 and isBuyVending)
+            isTargetBlock = isTargetBlock,
+            hasTransactionPrice = transactionPrice ~= nil,
+            hasMode = mode ~= nil,
+            hasSellingContents = sellingContents ~= nil
         })
         
-        print(string.format("[%s] Block %d: %s | Item: %s | Price: %s | Mode: %s",
-            vendingType,
+        -- Print debug info
+        local modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN")
+        print(string.format("[%s] Block %d: %s | Item: %s | Price: %s | Mode: %d (%s)",
+            isTargetBlock and "★ TARGET ★" or "VENDING",
             blockIndex,
             block.Name,
-            itemName or "Unknown",
+            finalItemName,
             tostring(priceValue or "N/A"),
-            modeValue or "N/A"))
+            modeValue or -1,
+            modeText))
     end
 end
 
 -- Send data to Discord
 local function sendToDiscord()
+    if #results == 0 then
+        print("No vending data found to send!")
+        return false
+    end
+    
     local http = game:GetService("HttpService")
     local uuid = generateUUID()
     
-    -- Create detailed summary with item names
+    -- Find the target block data
+    local targetBlockData = nil
+    for _, v in ipairs(results) do
+        if v.isTargetBlock then
+            targetBlockData = v
+            break
+        end
+    end
+    
+    -- Create detailed summary
     local itemList = ""
     for i, vending in ipairs(results) do
-        itemList = itemList .. string.format("\n%d. [%s] %s - %s coins (%s)",
+        local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
+        itemList = itemList .. string.format("\n%d. [%s] Block %d: %s - %s coins (%s)",
             i,
             vending.vendingType,
+            vending.blockIndex,
             vending.itemName,
             tostring(vending.price or "N/A"),
-            vending.mode
-        )
+            modeText)
+    end
+    
+    local targetInfo = ""
+    if targetBlockData then
+        local modeText = targetBlockData.modeValue == 0 and "BUY" or (targetBlockData.modeValue == 1 and "SELL" or "UNKNOWN")
+        targetInfo = string.format("\n\n**🎯 TARGET BLOCK 9761:**\n```\nItem: %s\nPrice: %s\nMode: %d (%s)\nBlock Name: %s\n```",
+            targetBlockData.itemName,
+            tostring(targetBlockData.price or "N/A"),
+            targetBlockData.modeValue or -1,
+            modeText,
+            targetBlockData.blockName)
     end
     
     local summaryText = string.format(
-        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nIsland: %s\nTotal Vendings: %d\nBuy Vending (Block 2103): %s\n\nItems Found:%s\n```",
+        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nIsland: %s\nTotal Vendings Found: %d\n\nItems Found:%s\n```%s",
         uuid,
         playerName,
         isOwner and "✅ YES" or "❌ NO",
-        islandId or "Unknown",
+        targetIslandId,
         #results,
-        buyVendingFound and "✅ YES" or "❌ NO",
-        itemList
-    )
+        itemList,
+        targetInfo or "")
     
     -- Send summary
     local summaryData = {
@@ -232,17 +253,23 @@ local function sendToDiscord()
     print("✓ Summary sent to Discord!")
     wait(1)
     
-    -- Send each vending item individually with full details
+    -- Send each vending item individually
     for _, vending in ipairs(results) do
+        local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
+        local isTargetText = vending.isTargetBlock and " 🎯 TARGET BLOCK 9761 🎯" or ""
+        
         local itemText = string.format(
-            "**🛒 Vending Item #%d**\n```\nType: %s\nBlock Index: %d\nBlock Name: %s\nItem Name: %s\nPrice: %s\nMode: %s\n```",
+            "**🛒 Vending Item #%d%s**\n```\nType: %s\nBlock Index: %d\nBlock Name: %s\nItem Name: %s\nFolder Name: %s\nPrice: %s coins\nMode: %d (%s)\n```",
             vending.blockIndex,
+            isTargetText,
             vending.vendingType,
             vending.blockIndex,
             vending.blockName,
             vending.itemName,
+            vending.folderName or "N/A",
             tostring(vending.price or "N/A"),
-            vending.mode
+            vending.modeValue or -1,
+            modeText
         )
         
         local itemData = {
@@ -260,7 +287,7 @@ local function sendToDiscord()
             warn("Failed to send item: " .. vending.itemName)
         end
         
-        wait(0.5) -- Rate limit protection
+        wait(0.5)
     end
     
     -- Send full JSON data
@@ -268,10 +295,11 @@ local function sendToDiscord()
         uuid = uuid,
         playerName = playerName,
         isOwner = isOwner,
-        islandId = islandId,
+        islandId = targetIslandId,
         scanTime = os.date("!%Y-%m-%d %H:%M:%S UTC"),
         totalVendingsFound = #results,
-        buyVendingFound = buyVendingFound,
+        targetBlockIndex = targetBlockIndex,
+        targetBlockData = targetBlockData,
         vendings = results
     }
     
@@ -310,23 +338,28 @@ local function sendToDiscord()
     return true
 end
 
--- Main execution (CLIENT SIDE)
-print("\n=== VENDING SCANNER STARTED (Client Side) ===")
-print("Scanning island: " .. tostring(islandId))
+-- Main execution
+print("\n=== VENDING SCANNER STARTED ===")
+print("Target Island: " .. targetIslandId)
+print("Target Block Index: " .. targetBlockIndex)
 print("Total blocks to scan: " .. tostring(#blocks:GetChildren()))
-print("Looking for vending machines...")
+print("Scanning for vending data...")
+print("Mode: 0 = BUY | 1 = SELL")
 
 -- Send the data
 local sendSuccess = sendToDiscord()
 if sendSuccess then
     print("\n✓✓✓ ALL DATA SENT SUCCESSFULLY! ✓✓✓")
-    print("  Total items sent: " .. #results)
-    print("  Buy vending at block 2103: " .. (buyVendingFound and "YES" or "NO"))
-    if buyVendingFound then
-        for _, v in ipairs(results) do
-            if v.isSpecialBuyBlock then
-                print("  Buy Item: " .. v.itemName .. " | Price: " .. tostring(v.price))
-            end
+    print("  Total vendings found: " .. #results)
+    
+    -- Highlight target block info
+    for _, v in ipairs(results) do
+        if v.isTargetBlock then
+            local modeText = v.modeValue == 0 and "BUY" or (v.modeValue == 1 and "SELL" or "UNKNOWN")
+            print(string.format("\n  🎯 TARGET BLOCK 9761:"))
+            print(string.format("     Item: %s", v.itemName))
+            print(string.format("     Price: %s coins", tostring(v.price or "N/A")))
+            print(string.format("     Mode: %d (%s)", v.modeValue or -1, modeText))
         end
     end
 else
