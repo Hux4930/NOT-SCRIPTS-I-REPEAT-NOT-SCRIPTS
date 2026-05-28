@@ -1,4 +1,4 @@
--- Auto-detect the player and their island
+-- Auto-detect the player and their island (CLIENT SIDE ONLY)
 local player = game.Players.LocalPlayer
 if not player then
     warn("No LocalPlayer found!")
@@ -74,28 +74,6 @@ print("Found island:", targetIsland.Name, "| ID:", islandId)
 print("Player:", playerName)
 print("Owner Status:", isOwner and "OWNER" or "Not Owner")
 
--- Test webhook connection first
-local function testWebhook()
-    local http = game:GetService("HttpService")
-    local testData = {
-        content = "🔍 Vending Scanner is online! Testing connection...",
-        username = "Vending Scanner"
-    }
-    
-    local success, response = pcall(function()
-        return http:PostAsync(webhookURL, http:JSONEncode(testData), Enum.HttpContentType.ApplicationJson)
-    end)
-    
-    if success then
-        print("✓ Webhook connection successful!")
-        return true
-    else
-        warn("✗ Webhook connection failed: " .. tostring(response))
-        print("Make sure HTTP requests are enabled in Game Settings > Security")
-        return false
-    end
-end
-
 -- Generate random UUID
 local function generateUUID()
     local letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -141,10 +119,12 @@ for _, block in ipairs(blocks:GetChildren()) do
         if isBuyVending then
             buyVendingFound = true
             print("✓ Found BUY vending at block 2103!")
+            print("  Item: " .. buyDisplayName)
+            print("  Amount: " .. buyAmount)
         end
     end
     
-    -- Check for sell vending
+    -- Check for sell vending (contains "vending" in name)
     if string.find(name, "vending") or isBuyVending then
         
         local transactionPrice = block:FindFirstChild("TransactionPrice")
@@ -154,15 +134,17 @@ for _, block in ipairs(blocks:GetChildren()) do
         local priceValue = nil
         local modeValue = nil
         local vendingType = "UNKNOWN"
+        local itemName = nil
         
-        -- Handle buy vending
+        -- Handle buy vending (block 2103)
         if isBuyVending and blockIndex == 2103 then
-            displayName = buyDisplayName
+            itemName = buyDisplayName
             priceValue = buyAmount
             modeValue = "Buy"
             vendingType = "BUY"
+            displayName = buyDisplayName
         else
-            -- Handle sell vending
+            -- Handle sell vending (original method)
             if transactionPrice then
                 priceValue = transactionPrice.Value
             end
@@ -171,29 +153,33 @@ for _, block in ipairs(blocks:GetChildren()) do
                 modeValue = mode.Value
             end
             
+            -- Get item name from crateMetalPineapple
             if sellingContents then
                 local crate = sellingContents:FindFirstChild("crateMetalPineapple")
                 if crate and crate:FindFirstChild("DisplayName") then
+                    itemName = crate.DisplayName.Value
                     displayName = crate.DisplayName.Value
                     vendingType = "SELL"
                 end
             end
         end
         
-        -- Add to results
+        -- Add to results with item name
         table.insert(results, {
             blockIndex = blockIndex,
             blockName = block.Name,
             vendingType = vendingType,
-            itemName = displayName or "Unknown",
+            itemName = itemName or displayName or "Unknown Item",
             price = priceValue,
-            mode = modeValue or "Unknown",
+            mode = modeValue or (vendingType == "BUY" and "Buy" or "Unknown"),
             isSpecialBuyBlock = (blockIndex == 2103 and isBuyVending)
         })
         
-        print(string.format("Found: %s at block %d | Price: %s | Mode: %s",
-            displayName or block.Name,
+        print(string.format("[%s] Block %d: %s | Item: %s | Price: %s | Mode: %s",
+            vendingType,
             blockIndex,
+            block.Name,
+            itemName or "Unknown",
             tostring(priceValue or "N/A"),
             modeValue or "N/A"))
     end
@@ -204,15 +190,27 @@ local function sendToDiscord()
     local http = game:GetService("HttpService")
     local uuid = generateUUID()
     
-    -- Create summary message
+    -- Create detailed summary with item names
+    local itemList = ""
+    for i, vending in ipairs(results) do
+        itemList = itemList .. string.format("\n%d. [%s] %s - %s coins (%s)",
+            i,
+            vending.vendingType,
+            vending.itemName,
+            tostring(vending.price or "N/A"),
+            vending.mode
+        )
+    end
+    
     local summaryText = string.format(
-        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nIsland: %s\nTotal Vendings: %d\nBuy Vending Found: %s\n```",
+        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nIsland: %s\nTotal Vendings: %d\nBuy Vending (Block 2103): %s\n\nItems Found:%s\n```",
         uuid,
         playerName,
         isOwner and "✅ YES" or "❌ NO",
         islandId or "Unknown",
         #results,
-        buyVendingFound and "✅ YES (Block 2103)" or "❌ NO"
+        buyVendingFound and "✅ YES" or "❌ NO",
+        itemList
     )
     
     -- Send summary
@@ -227,17 +225,21 @@ local function sendToDiscord()
     
     if not success then
         warn("Failed to send summary: " .. tostring(response))
+        print("Make sure HTTP Requests are enabled in Game Settings > Security")
         return false
     end
     
+    print("✓ Summary sent to Discord!")
     wait(1)
     
-    -- Send each vending item individually
+    -- Send each vending item individually with full details
     for _, vending in ipairs(results) do
         local itemText = string.format(
-            "**🛒 Vending Item**\n```\nType: %s\nBlock Index: %d\nItem: %s\nPrice: %s\nMode: %s\n```",
+            "**🛒 Vending Item #%d**\n```\nType: %s\nBlock Index: %d\nBlock Name: %s\nItem Name: %s\nPrice: %s\nMode: %s\n```",
+            vending.blockIndex,
             vending.vendingType,
             vending.blockIndex,
+            vending.blockName,
             vending.itemName,
             tostring(vending.price or "N/A"),
             vending.mode
@@ -261,7 +263,7 @@ local function sendToDiscord()
         wait(0.5) -- Rate limit protection
     end
     
-    -- Send full JSON as a code block
+    -- Send full JSON data
     local jsonDataStructure = {
         uuid = uuid,
         playerName = playerName,
@@ -275,7 +277,7 @@ local function sendToDiscord()
     
     local jsonString = http:JSONEncode(jsonDataStructure)
     
-    -- Split JSON into chunks if too long
+    -- Send JSON in chunks if needed
     local maxLength = 1900
     if #jsonString > maxLength then
         local chunks = {}
@@ -293,6 +295,7 @@ local function sendToDiscord()
             end)
             wait(0.5)
         end
+        print("✓ Full JSON sent in " .. #chunks .. " parts")
     else
         local fullData = {
             content = string.format("```json\n%s\n```", jsonString),
@@ -301,32 +304,37 @@ local function sendToDiscord()
         pcall(function()
             http:PostAsync(webhookURL, http:JSONEncode(fullData), Enum.HttpContentType.ApplicationJson)
         end)
+        print("✓ Full JSON sent!")
     end
     
     return true
 end
 
--- Main execution
-print("\n=== VENDING SCANNER STARTED ===")
-
--- Test webhook first
-local webhookWorks = testWebhook()
-if not webhookWorks then
-    print("⚠️ Webhook test failed! Check if HTTP Requests are enabled in Game Settings")
-    print("Go to Game Settings > Security > Allow HTTP Requests (must be enabled)")
-    return
-end
-
-wait(1)
+-- Main execution (CLIENT SIDE)
+print("\n=== VENDING SCANNER STARTED (Client Side) ===")
+print("Scanning island: " .. tostring(islandId))
+print("Total blocks to scan: " .. tostring(#blocks:GetChildren()))
+print("Looking for vending machines...")
 
 -- Send the data
 local sendSuccess = sendToDiscord()
 if sendSuccess then
-    print("✓ All data sent successfully!")
+    print("\n✓✓✓ ALL DATA SENT SUCCESSFULLY! ✓✓✓")
     print("  Total items sent: " .. #results)
     print("  Buy vending at block 2103: " .. (buyVendingFound and "YES" or "NO"))
+    if buyVendingFound then
+        for _, v in ipairs(results) do
+            if v.isSpecialBuyBlock then
+                print("  Buy Item: " .. v.itemName .. " | Price: " .. tostring(v.price))
+            end
+        end
+    end
 else
-    print("✗ Failed to send data to Discord")
+    print("\n✗ Failed to send data to Discord")
+    print("Make sure:")
+    print("1. HTTP Requests are enabled in Game Settings > Security")
+    print("2. The webhook URL is valid")
+    print("3. You're running this as a LocalScript")
 end
 
-print("=== SCANNER FINISHED ===")
+print("\n=== SCANNER FINISHED ===")
