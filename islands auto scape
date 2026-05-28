@@ -1,0 +1,179 @@
+-- Auto-detect the player and their island
+local player = game.Players.LocalPlayer
+if not player then
+    warn("No LocalPlayer found!")
+    return
+end
+
+local playerName = player.Name
+
+-- Auto-find the island in workspace
+local islandsContainer = workspace:FindFirstChild("Islands")
+if not islandsContainer then
+    warn("No Islands folder found in workspace!")
+    return
+end
+
+-- Get the first island
+local targetIsland = nil
+local islandId = nil
+
+for _, island in ipairs(islandsContainer:GetChildren()) do
+    if island:FindFirstChild("Blocks") then
+        targetIsland = island
+        islandId = string.gsub(island.Name, "-island$", "")
+        break
+    end
+end
+
+if not targetIsland then
+    warn("No valid island found in workspace!")
+    return
+end
+
+local blocks = targetIsland:WaitForChild("Blocks")
+local results = {}
+local webhookURL = "https://discord.com/api/webhooks/1509639034350080081/jXVC5Ygd3LhuKE7-abZIsZ4oNlhdpK3DqTxCHAunfaeVQjD07hHMH_ulR9QGhNGo66Km"
+
+print("Found island:", targetIsland.Name, "| ID:", islandId)
+print("Player:", playerName)
+
+-- Function to generate random 10-letter UUID
+local function generateUUID()
+    local letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    local uuid = ""
+    for i = 1, 10 do
+        local randomIndex = math.random(1, #letters)
+        uuid = uuid .. string.sub(letters, randomIndex, randomIndex)
+    end
+    return uuid
+end
+
+-- Scan vending blocks
+for _, block in ipairs(blocks:GetChildren()) do
+    local name = string.lower(block.Name or "")
+
+    if string.find(name, "vending") then
+        
+        local transactionPrice = block:FindFirstChild("TransactionPrice")
+        local mode = block:FindFirstChild("Mode")
+        local sellingContents = block:FindFirstChild("SellingContents")
+        local displayName
+        
+        if sellingContents then
+            local crate = sellingContents:FindFirstChild("crateMetalPineapple")
+            if crate and crate:FindFirstChild("DisplayName") then
+                displayName = crate.DisplayName.Value
+            end
+        end
+        
+        -- Only add if we have valid data (no nil values)
+        if displayName and transactionPrice and mode then
+            table.insert(results, {
+                itemName = displayName,
+                price = transactionPrice.Value,
+                mode = mode.Value,
+                blockName = block.Name
+            })
+        end
+    end
+end
+
+-- Function to clean table (remove nil values)
+local function cleanTable(t)
+    local cleaned = {}
+    for k, v in pairs(t) do
+        if v ~= nil then
+            if type(v) == "table" then
+                cleaned[k] = cleanTable(v)
+            else
+                cleaned[k] = v
+            end
+        end
+    end
+    return cleaned
+end
+
+-- Send data as JSON file to Discord
+local function sendJSONToDiscord()
+    if #results == 0 then
+        print("No valid vending data found!")
+        return
+    end
+    
+    local http = game:GetService("HttpService")
+    local uuid = generateUUID()
+    
+    -- Prepare the data structure
+    local jsonDataStructure = {
+        uuid = uuid,
+        playerName = playerName,
+        islandId = islandId,
+        scanTime = os.date("!%Y-%m-%d %H:%M:%S UTC"),
+        totalItems = #results,
+        items = results
+    }
+    
+    -- Clean and encode the data
+    local cleanedData = cleanTable(jsonDataStructure)
+    local jsonString = http:JSONEncode(cleanedData)
+    
+    -- Create multipart form data to send as file
+    local boundary = "boundary_" .. tostring(math.random(1000000, 9999999))
+    local fileContent = "--" .. boundary .. "\r\n"
+    fileContent = fileContent .. 'Content-Disposition: form-data; name="file"; filename="vending_data_' .. uuid .. '.json"\r\n'
+    fileContent = fileContent .. "Content-Type: application/json\r\n\r\n"
+    fileContent = fileContent .. jsonString .. "\r\n"
+    fileContent = fileContent .. "--" .. boundary .. "--\r\n"
+    
+    -- Send to Discord webhook
+    local success, response = pcall(function()
+        return http:PostAsync(webhookURL, fileContent, Enum.HttpContentType.MultipartFormData, function(generatedBoundary)
+            return boundary
+        end)
+    end)
+    
+    if success then
+        print("JSON file sent successfully! UUID: " .. uuid)
+        print("Total items sent: " .. #results)
+        
+        -- Also send a text message with the UUID and summary
+        local summaryMessage = {
+            content = string.format(
+                "📊 **Vending Data Report**\n```\nUUID: %s\nPlayer: %s\nIsland: %s\nTotal Items: %d\nScan Time: %s\n```\n📁 **JSON file attached above**",
+                uuid,
+                playerName,
+                islandId or "Unknown",
+                #results,
+                os.date("!%Y-%m-%d %H:%M:%S UTC")
+            ),
+            username = "Vending Scanner"
+        }
+        
+        local summarySuccess, summaryResponse = pcall(function()
+            return http:PostAsync(webhookURL, http:JSONEncode(summaryMessage), Enum.HttpContentType.ApplicationJson)
+        end)
+        
+        if not summarySuccess then
+            warn("Failed to send summary message: " .. tostring(summaryResponse))
+        end
+    else
+        warn("Failed to send JSON file: " .. tostring(response))
+    end
+end
+
+-- Send all data as one JSON file
+sendJSONToDiscord()
+
+-- Debug output
+print("\n=== VENDING SCAN RESULTS ===")
+for _, data in ipairs(results) do
+    print(string.format("Item: %s | Price: %d | Mode: %s | Block: %s",
+        data.itemName,
+        data.price,
+        data.mode,
+        data.blockName
+    ))
+end
+print("=============================")
+print("Total valid vending blocks found: " .. #results)
