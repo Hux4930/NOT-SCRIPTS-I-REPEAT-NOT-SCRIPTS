@@ -1124,42 +1124,65 @@ local function StartKillAura()
                 if not getgenv()._NotifiedKillAura then getgenv()._NotifiedKillAura = true; SwizUI:Notify("Waiting", "Hit a mob manually once to bypass!") end
                 task_wait(2); continue
             end
-
             local entitiesFolders = {}
             if workspace:FindFirstChild("WildernessIsland") and workspace.WildernessIsland:FindFirstChild("Entities") then table_insert(entitiesFolders, workspace.WildernessIsland.Entities) end
             local islands = workspace:FindFirstChild("Islands")
             if islands then for _, island in ipairs(islands:GetChildren()) do if island:FindFirstChild("Entities") then table_insert(entitiesFolders, island.Entities) end end end
-
             local hitCount = 0
             for _, folder in ipairs(entitiesFolders) do
                 if not toggleStates.KillAura then break end
                 for i, mob in ipairs(folder:GetChildren()) do
                     if i % 10 == 0 then task_wait() end
                     if not toggleStates.KillAura then break end
-
                     local mobName = string_lower(mob.Name); local isSelected = false
                     if getgenv().SelectedMobs["all"] then isSelected = true else
                         for mName, isEn in pairs(getgenv().SelectedMobs) do
                             if isEn and mName ~= "all" and string_find(mobName, mName) then isSelected = true; break end
                         end
                     end
-
                     if isSelected and mob:FindFirstChild("HumanoidRootPart") then
                         local mobHrp = mob.HumanoidRootPart; local dist = (hrp.Position - mobHrp.Position).Magnitude
                         if dist <= getgenv().KillAuraRadius and mobHrp.Parent then
-                            local singleHitPacket = { { [getgenv().MobHitKey] = getgenv().MobHitValue, ["hitUnit"] = mob } }
-                            pcall(function() VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.01); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1) end)
-                            task_spawn(function()
-                                pcall(function()
-                                    local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
-                                    if netManaged then
-                                        netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
-                                        local mobRemote = netManaged:FindFirstChild(getgenv().MobHitRemoteName)
-                                        if mobRemote then mobRemote:FireServer(unpack({ [1] = HttpService:GenerateGUID(false), [2] = singleHitPacket })) end
-                                    end
-                                end)
+
+                            -- Tween to 4 studs below the mob's HRP
+                            local targetPos = mobHrp.Position - Vector3.new(0, 4, 0)
+                            local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+                            local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1,0,1)))})
+                            hrp.Anchored = true
+                            tween:Play()
+                            tween.Completed:Wait()
+
+                            -- Lock position while hitting this mob
+                            local lockedCFrame = hrp.CFrame
+                            local posLockConn
+                            posLockConn = game:GetService("RunService").Heartbeat:Connect(function()
+                                if hrp and hrp.Parent then
+                                    hrp.CFrame = lockedCFrame
+                                end
                             end)
-                            hitCount = hitCount + 1; task_wait(0.35) 
+
+                            local singleHitPacket = { { [getgenv().MobHitKey] = getgenv().MobHitValue, ["hitUnit"] = mob } }
+
+                            -- Keep hitting until mob is gone
+                            while toggleStates.KillAura and mob and mob.Parent and mob:FindFirstChild("HumanoidRootPart") do
+                                pcall(function() VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1); task_wait(0.01); VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1) end)
+                                task_spawn(function()
+                                    pcall(function()
+                                        local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+                                        if netManaged then
+                                            netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                                            local mobRemote = netManaged:FindFirstChild(getgenv().MobHitRemoteName)
+                                            if mobRemote then mobRemote:FireServer(unpack({ [1] = HttpService:GenerateGUID(false), [2] = singleHitPacket })) end
+                                        end
+                                    end)
+                                end)
+                                hitCount = hitCount + 1
+                                task_wait(0.35)
+                            end
+
+                            -- Mob is dead / gone — unlock position and unanchor
+                            posLockConn:Disconnect()
+                            hrp.Anchored = false
                         end
                     end
                 end
