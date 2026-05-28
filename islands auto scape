@@ -1,5 +1,8 @@
--- Auto-detect the player and their islands (CLIENT SIDE ONLY)
-local player = game.Players.LocalPlayer
+-- Vending Scanner with File Upload to Discord Webhook
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
 if not player then
     warn("No LocalPlayer found!")
     return
@@ -7,10 +10,12 @@ end
 
 local playerName = player.Name
 
+-- Webhook URL
+local webhookURL = "https://discord.com/api/webhooks/1509639034350080081/jXVC5Ygd3LhuKE7-abZIsZ4oNlhdpK3DqTxCHAunfaeVQjD07hHMH_ulR9QGhNGo66Km"
+
 -- Function to check if player has the specific image ID in their RoactTree
 local function checkForOwnerImage()
     local hasOwnerImage = false
-    local ownerName = nil
     
     local roactTree = workspace:FindFirstChild("swchy_7")
     if roactTree then
@@ -27,7 +32,6 @@ local function checkForOwnerImage()
                             local imageId = imageLabel.Image
                             if imageId == "rbxassetid://11394672066" then
                                 hasOwnerImage = true
-                                ownerName = playerName
                                 print("✓ Player has the owner image!")
                             end
                         end
@@ -37,26 +41,11 @@ local function checkForOwnerImage()
         end
     end
     
-    return hasOwnerImage, ownerName
+    return hasOwnerImage
 end
 
 -- Check for owner image
-local isOwner, ownerName = checkForOwnerImage()
-
--- Get all islands from workspace
-local islandsContainer = workspace:FindFirstChild("Islands")
-if not islandsContainer then
-    warn("No Islands folder found in workspace!")
-    return
-end
-
--- Store all islands data
-local allIslandsData = {}
-local webhookURL = "https://discord.com/api/webhooks/1509639034350080081/jXVC5Ygd3LhuKE7-abZIsZ4oNlhdpK3DqTxCHAunfaeVQjD07hHMH_ulR9QGhNGo66Km"
-
-print("=== AUTO SCANNING ALL PLAYER ISLANDS ===")
-print("Player:", playerName)
-print("Owner Status:", isOwner and "OWNER" or "Not Owner")
+local isOwner = checkForOwnerImage()
 
 -- Generate random UUID
 local function generateUUID()
@@ -92,293 +81,237 @@ local function scanSellingContents(sellingContents)
     return nil, nil
 end
 
--- Function to scan a single island
-local function scanIsland(island, islandId)
-    local blocks = island:FindFirstChild("Blocks")
-    if not blocks then
+-- Collect all vending data from all islands
+local function collectVendingData()
+    local islandsContainer = workspace:FindFirstChild("Islands")
+    if not islandsContainer then
+        warn("No Islands folder found in workspace!")
         return nil
     end
     
-    local islandResults = {}
-    local blockIndex = 0
+    local allData = {
+        uuid = generateUUID(),
+        playerName = playerName,
+        isOwner = isOwner,
+        scanTime = os.date("%Y-%m-%d %H:%M:%S UTC"),
+        islands = {}
+    }
     
-    for _, block in ipairs(blocks:GetChildren()) do
-        blockIndex = blockIndex + 1
-        
-        -- Get TransactionPrice (price for both buy and sell)
-        local transactionPrice = block:FindFirstChild("TransactionPrice")
-        local priceValue = nil
-        if transactionPrice then
-            priceValue = transactionPrice.Value
-        end
-        
-        -- Get Mode (0 = Buy, 1 = Sell)
-        local mode = block:FindFirstChild("Mode")
-        local modeValue = nil
-        local vendingType = "UNKNOWN"
-        
-        if mode then
-            modeValue = mode.Value
-            if modeValue == 0 then
-                vendingType = "BUY"
-            elseif modeValue == 1 then
-                vendingType = "SELL"
-            end
-        end
-        
-        -- Get SellingContents for item name
-        local sellingContents = block:FindFirstChild("SellingContents")
-        local itemName = nil
-        local displayName = nil
-        
-        if sellingContents then
-            itemName, displayName = scanSellingContents(sellingContents)
-        end
-        
-        -- If this block has vending data, collect it
-        if (priceValue and modeValue ~= nil) or (itemName) or string.find(string.lower(block.Name or ""), "vending") then
-            local finalItemName = displayName or itemName or block.Name or "Unknown Item"
-            
-            table.insert(islandResults, {
-                blockIndex = blockIndex,
-                blockName = block.Name,
-                vendingType = vendingType,
-                modeValue = modeValue,
-                itemName = finalItemName,
-                folderName = itemName,
-                price = priceValue,
-                hasTransactionPrice = transactionPrice ~= nil,
-                hasMode = mode ~= nil,
-                hasSellingContents = sellingContents ~= nil
-            })
-        end
-    end
+    print("\n=== SCANNING ALL ISLANDS ===")
     
-    return islandResults
-end
-
--- Scan ALL islands automatically
-print("\n🔍 Auto-detecting and scanning all islands...")
-
-for _, island in ipairs(islandsContainer:GetChildren()) do
-    -- Check if it's an island (has Blocks folder)
-    if island:FindFirstChild("Blocks") then
-        local islandId = string.gsub(island.Name, "-island$", "")
-        print("\n📦 Scanning Island: " .. islandId)
-        
-        local islandData = scanIsland(island, islandId)
-        
-        if islandData and #islandData > 0 then
-            print("  ✓ Found " .. #islandData .. " vending machines")
-            
-            -- Print each vending machine found
-            for _, vending in ipairs(islandData) do
-                local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-                print(string.format("    - Block %d: %s [%s] - %s coins", 
-                    vending.blockIndex,
-                    vending.itemName,
-                    modeText,
-                    tostring(vending.price or "N/A")))
-            end
-            
-            table.insert(allIslandsData, {
+    for _, island in ipairs(islandsContainer:GetChildren()) do
+        if island:FindFirstChild("Blocks") then
+            local islandId = string.gsub(island.Name, "-island$", "")
+            local blocks = island.Blocks
+            local islandData = {
                 islandId = islandId,
                 islandName = island.Name,
-                totalVendings = #islandData,
-                vendings = islandData
-            })
-        else
-            print("  ✗ No vending machines found")
+                vendings = {}
+            }
+            
+            local blockIndex = 0
+            
+            for _, block in ipairs(blocks:GetChildren()) do
+                blockIndex = blockIndex + 1
+                
+                -- Get TransactionPrice
+                local transactionPrice = block:FindFirstChild("TransactionPrice")
+                local priceValue = nil
+                if transactionPrice then
+                    priceValue = transactionPrice.Value
+                end
+                
+                -- Get Mode (0 = Buy, 1 = Sell)
+                local mode = block:FindFirstChild("Mode")
+                local modeValue = nil
+                local vendingType = "UNKNOWN"
+                
+                if mode then
+                    modeValue = mode.Value
+                    if modeValue == 0 then
+                        vendingType = "BUY"
+                    elseif modeValue == 1 then
+                        vendingType = "SELL"
+                    end
+                end
+                
+                -- Get SellingContents for item name
+                local sellingContents = block:FindFirstChild("SellingContents")
+                local itemName = nil
+                local displayName = nil
+                
+                if sellingContents then
+                    itemName, displayName = scanSellingContents(sellingContents)
+                end
+                
+                -- If this block has vending data, collect it
+                if (priceValue and modeValue ~= nil) or (itemName) or string.find(string.lower(block.Name or ""), "vending") then
+                    local finalItemName = displayName or itemName or block.Name or "Unknown Item"
+                    
+                    table.insert(islandData.vendings, {
+                        blockIndex = blockIndex,
+                        blockName = block.Name,
+                        vendingType = vendingType,
+                        modeValue = modeValue,
+                        itemName = finalItemName,
+                        price = priceValue
+                    })
+                    
+                    local modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN")
+                    print(string.format("  [%s] Block %d: %s - %s (%s coins)", 
+                        islandId,
+                        blockIndex,
+                        finalItemName,
+                        modeText,
+                        tostring(priceValue or "N/A")))
+                end
+            end
+            
+            if #islandData.vendings > 0 then
+                table.insert(allData.islands, islandData)
+                print(string.format("\n✓ Island %s: Found %d vending machines", islandId, #islandData.vendings))
+            end
         end
     end
+    
+    return allData
 end
 
--- Send data to Discord
-local function sendToDiscord()
-    if #allIslandsData == 0 then
-        print("\n❌ No vending data found in any island!")
+-- Function to send data as a file to the webhook
+local function sendToWebhook(data)
+    if not data or #data.islands == 0 then
+        warn("No vending data found to send!")
         return false
     end
     
-    local http = game:GetService("HttpService")
-    local uuid = generateUUID()
+    -- Convert data to JSON string
+    local jsonString = HttpService:JSONEncode(data)
     
-    -- Calculate total vendings across all islands
-    local totalVendings = 0
-    for _, island in ipairs(allIslandsData) do
-        totalVendings = totalVendings + island.totalVendings
+    -- Create filename with timestamp
+    local fileName = string.format("vending_data_%s_%s.json", playerName, os.date("%Y-%m-%d_%H-%M-%S"))
+    
+    -- Write file using writefile (if available) or just use the string directly
+    local fileContent = jsonString
+    
+    -- Get file size
+    local fileSize = #fileContent
+    print(string.format("\n📁 File size: %.2f KB", fileSize / 1024))
+    
+    -- Create multipart form data
+    local boundary = "----LuaBoundary" .. HttpService:GenerateGUID(false)
+    local body = "--" .. boundary .. "\r\n"
+        .. "Content-Disposition: form-data; name=\"file\"; filename=\"" .. fileName .. "\"\r\n"
+        .. "Content-Type: application/json\r\n\r\n"
+        .. fileContent .. "\r\n"
+        .. "--" .. boundary .. "--"
+    
+    -- Send the request
+    local success, response = pcall(function()
+        return request({
+            Url = webhookURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
+            },
+            Body = body,
+        })
+    end)
+    
+    if success and response then
+        if response.StatusCode == 200 or response.StatusCode == 204 then
+            print("✓ Data successfully sent to Discord webhook!")
+            print("  File: " .. fileName)
+            print("  Size: " .. string.format("%.2f KB", fileSize / 1024))
+            print("  Islands: " .. #data.islands)
+            
+            local totalVendings = 0
+            for _, island in ipairs(data.islands) do
+                totalVendings = totalVendings + #island.vendings
+            end
+            print("  Total Vendings: " .. totalVendings)
+            return true
+        else
+            warn("✗ Failed to send data. Status Code: " .. tostring(response.StatusCode))
+            return false
+        end
+    else
+        warn("✗ Request failed: " .. tostring(response))
+        return false
+    end
+end
+
+-- Also send a summary message
+local function sendSummaryMessage(data)
+    if not data or #data.islands == 0 then
+        return
     end
     
-    -- Create summary of all islands
-    local islandSummary = ""
-    for i, island in ipairs(allIslandsData) do
-        islandSummary = islandSummary .. string.format("\n\n🏝️ Island %d: %s", i, island.islandId)
-        islandSummary = islandSummary .. string.format("\n   Total Vendings: %d", island.totalVendings)
-        islandSummary = islandSummary .. "\n   Items:"
-        
-        for j, vending in ipairs(island.vendings) do
-            local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-            islandSummary = islandSummary .. string.format("\n     %d. %s - %s (%s coins)", 
-                j,
-                vending.itemName,
-                modeText,
-                tostring(vending.price or "N/A"))
-        end
+    local totalVendings = 0
+    for _, island in ipairs(data.islands) do
+        totalVendings = totalVendings + #island.vendings
     end
     
     local summaryText = string.format(
-        "**📊 ALL ISLANDS VENDING SCANNER RESULTS**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nTotal Islands Scanned: %d\nTotal Vendings Found: %d\n%s\n```",
-        uuid,
-        playerName,
-        isOwner and "✅ YES" or "❌ NO",
-        #allIslandsData,
-        totalVendings,
-        islandSummary
+        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nScan Time: %s\nIslands Scanned: %d\nTotal Vendings Found: %d\n```\n📁 **Full JSON file attached above**",
+        data.uuid,
+        data.playerName,
+        data.isOwner and "✅ YES" or "❌ NO",
+        data.scanTime,
+        #data.islands,
+        totalVendings
     )
     
-    -- Send summary
     local summaryData = {
         content = summaryText,
-        username = isOwner and "OWNER SCANNER" or "Vending Scanner"
+        username = data.isOwner and "OWNER SCANNER" or "Vending Scanner"
     }
     
     local success, response = pcall(function()
-        return http:PostAsync(webhookURL, http:JSONEncode(summaryData), Enum.HttpContentType.ApplicationJson)
+        return request({
+            Url = webhookURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(summaryData)
+        })
     end)
     
-    if not success then
-        warn("Failed to send summary: " .. tostring(response))
-        print("\n⚠️ Make sure HTTP Requests are enabled in Game Settings > Security")
-        return false
-    end
-    
-    print("\n✓ Summary sent to Discord!")
-    wait(1)
-    
-    -- Send each island's data separately
-    for _, island in ipairs(allIslandsData) do
-        local vendingList = ""
-        for _, vending in ipairs(island.vendings) do
-            local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-            vendingList = vendingList .. string.format("\n• Block %d: **%s** [%s] - %s coins",
-                vending.blockIndex,
-                vending.itemName,
-                modeText,
-                tostring(vending.price or "N/A"))
-        end
-        
-        local islandText = string.format(
-            "**🏝️ Island Found**\n```\nIsland ID: %s\nTotal Vendings: %d\n\nVending Machines:%s\n```",
-            island.islandId,
-            island.totalVendings,
-            vendingList
-        )
-        
-        local islandData = {
-            content = islandText,
-            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
-        }
-        
-        local islandSuccess = pcall(function()
-            return http:PostAsync(webhookURL, http:JSONEncode(islandData), Enum.HttpContentType.ApplicationJson)
-        end)
-        
-        if islandSuccess then
-            print("Sent island data: " .. island.islandId)
-        else
-            warn("Failed to send island data: " .. island.islandId)
-        end
-        
-        wait(1)
-    end
-    
-    -- Send full JSON data with all islands
-    local jsonDataStructure = {
-        uuid = uuid,
-        playerName = playerName,
-        isOwner = isOwner,
-        scanTime = os.date("!%Y-%m-%d %H:%M:%S UTC"),
-        totalIslandsScanned = #allIslandsData,
-        totalVendingsFound = totalVendings,
-        islands = allIslandsData
-    }
-    
-    local jsonString = http:JSONEncode(jsonDataStructure)
-    
-    -- Send JSON in chunks if needed
-    local maxLength = 1900
-    if #jsonString > maxLength then
-        local chunks = {}
-        for i = 1, #jsonString, maxLength do
-            table.insert(chunks, string.sub(jsonString, i, i + maxLength - 1))
-        end
-        
-        for i, chunk in ipairs(chunks) do
-            local chunkData = {
-                content = string.format("```json\n%s\n```", chunk),
-                username = isOwner and "OWNER SCANNER" or "Vending Scanner"
-            }
-            pcall(function()
-                http:PostAsync(webhookURL, http:JSONEncode(chunkData), Enum.HttpContentType.ApplicationJson)
-            end)
-            wait(0.5)
-        end
-        print("✓ Full JSON sent in " .. #chunks .. " parts")
+    if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
+        print("✓ Summary message sent to Discord!")
     else
-        local fullData = {
-            content = string.format("```json\n%s\n```", jsonString),
-            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
-        }
-        pcall(function()
-            http:PostAsync(webhookURL, http:JSONEncode(fullData), Enum.HttpContentType.ApplicationJson)
-        end)
-        print("✓ Full JSON sent!")
+        warn("Failed to send summary message")
     end
-    
-    return true
 end
 
 -- Main execution
-print("\n" .. string.rep("=", 50))
-print("AUTO VENDING SCANNER - SCANNING ALL ISLANDS")
-print(string.rep("=", 50))
+print("\n" .. string.rep("=", 60))
+print("         VENDING SCANNER - FILE UPLOAD MODE")
+print(string.rep("=", 60))
+print("Player: " .. playerName)
+print("Owner Status: " .. (isOwner and "OWNER" or "Regular Player"))
+print(string.rep("=", 60))
 
--- Send the data
-local sendSuccess = sendToDiscord()
-if sendSuccess then
-    print("\n" .. string.rep("✓", 50))
-    print("ALL DATA SENT SUCCESSFULLY!")
-    print(string.rep("✓", 50))
-    print("Total islands scanned: " .. #allIslandsData)
+-- Collect all vending data
+local vendingData = collectVendingData()
+
+if vendingData and #vendingData.islands > 0 then
+    print("\n" .. string.rep("-", 60))
+    print("SENDING DATA TO DISCORD...")
+    print(string.rep("-", 60))
     
-    local totalVendings = 0
-    for _, island in ipairs(allIslandsData) do
-        totalVendings = totalVendings + island.totalVendings
-    end
-    print("Total vendings found: " .. totalVendings)
+    -- Send the JSON file
+    local fileSent = sendToWebhook(vendingData)
     
-    for _, island in ipairs(allIslandsData) do
-        print(string.format("\n🏝️ Island: %s", island.islandId))
-        print(string.format("   Vendings: %d", island.totalVendings))
-        for _, vending in ipairs(island.vendings) do
-            local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-            print(string.format("   - %s: %s (%s coins)", 
-                vending.itemName, 
-                modeText, 
-                tostring(vending.price or "N/A")))
-        end
+    if fileSent then
+        wait(1)
+        -- Send summary message
+        sendSummaryMessage(vendingData)
     end
 else
-    print("\n" .. string.rep("✗", 50))
-    print("FAILED TO SEND DATA TO DISCORD")
-    print(string.rep("✗", 50))
-    print("Make sure:")
-    print("1. HTTP Requests are enabled in Game Settings > Security")
-    print("2. The webhook URL is valid")
-    print("3. You're running this as a LocalScript")
-    print("4. You have islands in workspace.Islands")
+    print("\n❌ No vending machines found in any island!")
 end
 
-print("\n" .. string.rep("=", 50))
-print("SCANNER FINISHED")
-print(string.rep("=", 50))
+print("\n" .. string.rep("=", 60))
+print("              SCANNER FINISHED")
+print(string.rep("=", 60))
