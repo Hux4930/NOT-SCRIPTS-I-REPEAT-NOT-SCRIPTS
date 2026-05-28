@@ -1144,13 +1144,28 @@ local function StartKillAura()
                         local mobHrp = mob.HumanoidRootPart; local dist = (hrp.Position - mobHrp.Position).Magnitude
                         if dist <= getgenv().KillAuraRadius and mobHrp.Parent then
 
-                            -- Tween to 4 studs below the mob's HRP
-                            local targetPos = mobHrp.Position - Vector3.new(0, 4, 0)
-                            local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-                            local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1,0,1)))})
+                            -- Smooth lerp to 6 studs below the mob's HRP
+                            local targetPos = mobHrp.Position - Vector3.new(0, 6, 0)
+                            local targetCFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
+                            local startCFrame = hrp.CFrame
+                            local duration = 0.15
+                            local elapsed = 0
+
+                            local humanoid = char:FindFirstChildOfClass("Humanoid")
+                            if humanoid then humanoid.PlatformStand = true end
                             hrp.Anchored = true
-                            tween:Play()
-                            tween.Completed:Wait()
+
+                            local lerpConn
+                            lerpConn = game:GetService("RunService").Heartbeat:Connect(function(dt)
+                                elapsed = elapsed + dt
+                                local alpha = math.clamp(elapsed / duration, 0, 1)
+                                local t = alpha * alpha * (3 - 2 * alpha)
+                                hrp.CFrame = startCFrame:Lerp(targetCFrame, t)
+                            end)
+
+                            repeat task_wait() until elapsed >= duration
+                            lerpConn:Disconnect()
+                            hrp.CFrame = targetCFrame
 
                             -- Lock position while hitting this mob
                             local lockedCFrame = hrp.CFrame
@@ -1180,8 +1195,9 @@ local function StartKillAura()
                                 task_wait(0.35)
                             end
 
-                            -- Mob is dead / gone — unlock position and unanchor
+                            -- Mob dead — restore
                             posLockConn:Disconnect()
+                            if humanoid then humanoid.PlatformStand = false end
                             hrp.Anchored = false
                         end
                     end
