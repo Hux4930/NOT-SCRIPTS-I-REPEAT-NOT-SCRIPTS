@@ -13,9 +13,10 @@ local playerName = player.Name
 -- Your local server IP and port
 local localIP = "100.119.217.108"
 local localPort = 6712
-local webhookURL = "http://" .. localIP .. ":" .. localPort .. "/api/vending"
+local baseURL = "http://" .. localIP .. ":" .. localPort .. "/api/vending"
+local BATCH_SIZE = 10 * 1024 -- 10KB in bytes
 
-print("📡 Sending to: " .. webhookURL)
+print("📡 Sending to: " .. baseURL)
 
 -- Function to check if player has the specific image ID in their RoactTree
 local function checkForOwnerImage()
@@ -85,7 +86,7 @@ local function scanSellingContents(sellingContents)
     return nil, nil
 end
 
--- Collect all vending data from all islands
+-- Collect all vending data from all islands (ONLY SELL/BUY)
 local function collectVendingData()
     local islandsContainer = workspace:FindFirstChild("Islands")
     if not islandsContainer then
@@ -103,6 +104,9 @@ local function collectVendingData()
     }
     
     print("\n=== SCANNING ALL ISLANDS ===")
+    print("⚠️  ONLY collecting SELL and BUY items (UNKNOWN will be ignored)")
+    
+    local totalIgnored = 0
     
     for _, island in ipairs(islandsContainer:GetChildren()) do
         if island:FindFirstChild("Blocks") then
@@ -129,7 +133,7 @@ local function collectVendingData()
                 -- Get Mode (0 = Buy, 1 = Sell)
                 local mode = block:FindFirstChild("Mode")
                 local modeValue = nil
-                local vendingType = "UNKNOWN"
+                local vendingType = nil
                 
                 if mode then
                     modeValue = mode.Value
@@ -138,6 +142,13 @@ local function collectVendingData()
                     elseif modeValue == 1 then
                         vendingType = "SELL"
                     end
+                end
+                
+                -- SKIP if mode is UNKNOWN (nil or not 0 or 1)
+                if vendingType == nil or (modeValue ~= 0 and modeValue ~= 1) then
+                    totalIgnored = totalIgnored + 1
+                    -- Silently skip unknown items
+                    continue
                 end
                 
                 -- Get SellingContents for item name
@@ -149,8 +160,8 @@ local function collectVendingData()
                     itemName, displayName = scanSellingContents(sellingContents)
                 end
                 
-                -- If this block has vending data, collect it
-                if (priceValue and modeValue ~= nil) or (itemName) or string.find(string.lower(block.Name or ""), "vending") then
+                -- Only collect if it has price or item name
+                if priceValue or itemName then
                     local finalItemName = displayName or itemName or block.Name or "Unknown Item"
                     
                     table.insert(islandData.vendings, {
@@ -158,44 +169,109 @@ local function collectVendingData()
                         blockName = block.Name,
                         vendingType = vendingType,
                         modeValue = modeValue,
-                        modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN"),
+                        modeText = vendingType, -- Will be either "BUY" or "SELL"
                         itemName = finalItemName,
                         price = priceValue
                     })
                     
-                    local modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN")
-                    print(string.format("  [%s] Block %d: %s - %s (%s coins)", 
+                    print(string.format("  ✓ [%s] Block %d: %s - %s (%s coins)", 
                         islandId,
                         blockIndex,
                         finalItemName,
-                        modeText,
+                        vendingType,
                         tostring(priceValue or "N/A")))
                 end
             end
             
             if #islandData.vendings > 0 then
                 table.insert(allData.islands, islandData)
-                print(string.format("\n✓ Island %s: Found %d vending machines", islandId, #islandData.vendings))
+                print(string.format("\n✓ Island %s: Found %d valid vending machines", islandId, #islandData.vendings))
             end
         end
+    end
+    
+    if totalIgnored > 0 then
+        print(string.format("\n⚠️  Ignored %d item(s) that were not SELL or BUY", totalIgnored))
     end
     
     return allData
 end
 
--- Send data using executor's request function (works for Synapse, Krnl, ScriptWare)
-local function sendToLocalServer(data)
-    if not data or #data.islands == 0 then
-        warn("No vending data found to send!")
-        return false
+-- Split data into batches based on JSON size
+local function splitIntoBatches(data)
+    local batches = {}
+    local currentBatch = {
+        uuid = data.uuid,
+        playerName = data.playerName,
+        isOwner = data.isOwner,
+        scanTime = data.scanTime,
+        timestamp = data.timestamp,
+        batchNumber = 0,
+        totalBatches = 0,
+        islands = {}
+    }
+    
+    local function getBatchSize(batch)
+        return #HttpService:JSONEncode(batch)
     end
     
-    -- Convert data to JSON string
-    local jsonString = HttpService:JSONEncode(data)
+    for _, island in ipairs(data.islands) do
+        -- Try adding island to current batch
+        local testBatch = {
+            uuid = currentBatch.uuid,
+            playerName = currentBatch.playerName,
+            isOwner = currentBatch.isOwner,
+            scanTime = currentBatch.scanTime,
+            timestamp = currentBatch.timestamp,
+            batchNumber = currentBatch.batchNumber,
+            totalBatches = 0,
+            islands = {}
+        }
+        -- Manually copy islands
+        for _, v in ipairs(currentBatch.islands) do
+            table.insert(testBatch.islands, v)
+        end
+        table.insert(testBatch.islands, island)
+        
+        if getBatchSize(testBatch) > BATCH_SIZE and #currentBatch.islands > 0 then
+            -- Current batch is full, save it and start new one
+            table.insert(batches, currentBatch)
+            currentBatch = {
+                uuid = data.uuid,
+                playerName = data.playerName,
+                isOwner = data.isOwner,
+                scanTime = data.scanTime,
+                timestamp = data.timestamp,
+                batchNumber = #batches + 1,
+                totalBatches = 0,
+                islands = {island}
+            }
+        else
+            -- Add to current batch
+            table.insert(currentBatch.islands, island)
+        end
+    end
+    
+    -- Add the last batch if it has data
+    if #currentBatch.islands > 0 then
+        table.insert(batches, currentBatch)
+    end
+    
+    -- Update total batch count
+    for i, batch in ipairs(batches) do
+        batch.batchNumber = i
+        batch.totalBatches = #batches
+    end
+    
+    return batches
+end
+
+-- Send a single batch
+local function sendBatch(webhookURL, batch, batchNumber, totalBatches)
+    local jsonString = HttpService:JSONEncode(batch)
     local fileSize = #jsonString
     
-    print(string.format("\n📦 JSON Size: %.2f KB", fileSize / 1024))
-    print("📡 Sending to local server...")
+    print(string.format("  📦 Batch %d/%d: %.2f KB", batchNumber, totalBatches, fileSize / 1024))
     
     -- Try different request methods based on executor
     local success = false
@@ -203,7 +279,6 @@ local function sendToLocalServer(data)
     
     -- Method 1: syn.request (Synapse X)
     if syn and syn.request then
-        print("Using syn.request...")
         local response = syn.request({
             Url = webhookURL,
             Method = "POST",
@@ -220,7 +295,6 @@ local function sendToLocalServer(data)
     
     -- Method 2: request (Krnl, ScriptWare)
     if not success and request then
-        print("Using request...")
         local response = request({
             Url = webhookURL,
             Method = "POST",
@@ -237,7 +311,6 @@ local function sendToLocalServer(data)
     
     -- Method 3: http_request (some executors)
     if not success and http_request then
-        print("Using http_request...")
         local response = http_request({
             Url = webhookURL,
             Method = "POST",
@@ -254,7 +327,6 @@ local function sendToLocalServer(data)
     
     -- Method 4: HttpService (fallback)
     if not success then
-        print("Using HttpService.PostAsync...")
         local postSuccess, response = pcall(function()
             return HttpService:PostAsync(webhookURL, jsonString, Enum.HttpContentType.ApplicationJson)
         end)
@@ -264,19 +336,59 @@ local function sendToLocalServer(data)
         end
     end
     
-    if success then
-        print("✓ Data successfully sent to local server!")
-        print("  Response: " .. responseText)
-        return true
-    else
-        warn("✗ Failed to send to local server")
-        print("\nTroubleshooting:")
-        print("1. Make sure your local server is running: node server.js")
-        print("2. Check if " .. localIP .. " is your correct IP")
-        print("3. Try using http://127.0.0.1:3000/api/vending instead")
-        print("4. Check Windows Firewall - allow port 3000")
+    return success, responseText
+end
+
+-- Send data in batches
+local function sendToLocalServer(data)
+    if not data or #data.islands == 0 then
+        warn("No valid vending data found to send (only SELL and BUY items are sent)!")
         return false
     end
+    
+    -- Calculate total size
+    local fullJSON = HttpService:JSONEncode(data)
+    local totalSize = #fullJSON
+    print(string.format("\n📦 Total Valid Data Size: %.2f KB", totalSize / 1024))
+    print(string.format("🔪 Splitting into %d KB batches...", BATCH_SIZE / 1024))
+    
+    -- Split into batches
+    local batches = splitIntoBatches(data)
+    local numBatches = #batches
+    
+    if numBatches == 0 then
+        warn("No batches created!")
+        return false
+    end
+    
+    print(string.format("📨 Created %d batch(es)", numBatches))
+    print("📡 Sending to local server...\n")
+    
+    local allSuccess = true
+    local successfulBatches = 0
+    
+    -- Send each batch
+    for i, batch in ipairs(batches) do
+        local success, response = sendBatch(baseURL, batch, i, numBatches)
+        
+        if success then
+            successfulBatches = successfulBatches + 1
+            print(string.format("  ✓ Batch %d/%d sent successfully", i, numBatches))
+            if response and response ~= "" then
+                print(string.format("    Response: %s", response))
+            end
+        else
+            allSuccess = false
+            warn(string.format("  ✗ Batch %d/%d failed to send", i, numBatches))
+        end
+        
+        -- Small delay between batches to prevent overwhelming the server
+        wait(0.5)
+    end
+    
+    print(string.format("\n📊 Summary: %d/%d batches sent successfully", successfulBatches, numBatches))
+    
+    return allSuccess
 end
 
 -- Print summary to console
@@ -286,8 +398,18 @@ local function printSummary(data)
     end
     
     local totalVendings = 0
+    local buyCount = 0
+    local sellCount = 0
+    
     for _, island in ipairs(data.islands) do
-        totalVendings = totalVendings + #island.vendings
+        for _, vending in ipairs(island.vendings) do
+            totalVendings = totalVendings + 1
+            if vending.vendingType == "BUY" then
+                buyCount = buyCount + 1
+            elseif vending.vendingType == "SELL" then
+                sellCount = sellCount + 1
+            end
+        end
     end
     
     print("\n" .. string.rep("=", 60))
@@ -299,6 +421,8 @@ local function printSummary(data)
     print("Scan Time: " .. data.scanTime)
     print("Islands Scanned: " .. #data.islands)
     print("Total Vendings: " .. totalVendings)
+    print(string.format("  - BUY: %d", buyCount))
+    print(string.format("  - SELL: %d", sellCount))
     print(string.rep("=", 60))
     
     for _, island in ipairs(data.islands) do
@@ -321,7 +445,8 @@ print("      VENDING SCANNER - LOCAL SERVER")
 print(string.rep("=", 60))
 print("Player: " .. playerName)
 print("Owner Status: " .. (isOwner and "OWNER" or "Regular Player"))
-print("Server URL: " .. webhookURL)
+print("Server URL: " .. baseURL)
+print("⚠️  ONLY sending SELL and BUY items")
 print(string.rep("=", 60))
 
 -- Collect all vending data
@@ -344,7 +469,7 @@ if vendingData and #vendingData.islands > 0 then
         print("\n❌ FAILED: Could not send to local server")
     end
 else
-    print("\n❌ No vending machines found in any island!")
+    print("\n❌ No valid SELL or BUY vending machines found in any island!")
 end
 
 print("\n" .. string.rep("=", 60))
