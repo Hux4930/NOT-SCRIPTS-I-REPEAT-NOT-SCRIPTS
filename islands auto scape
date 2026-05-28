@@ -1,4 +1,4 @@
--- Vending Scanner with File Upload to Discord Webhook
+-- Vending Scanner - Send JSON to Local Server
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -10,8 +10,10 @@ end
 
 local playerName = player.Name
 
--- Webhook URL
-local webhookURL = "https://discord.com/api/webhooks/1509639034350080081/jXVC5Ygd3LhuKE7-abZIsZ4oNlhdpK3DqTxCHAunfaeVQjD07hHMH_ulR9QGhNGo66Km"
+-- Local server configuration (change these to match your local server)
+local localServerURL = "http://localhost:3000/api/vending"  -- Change port as needed
+-- Alternative: http://127.0.0.1:3000/api/vending
+-- Or use your local IP: http://192.168.1.100:3000/api/vending
 
 -- Function to check if player has the specific image ID in their RoactTree
 local function checkForOwnerImage()
@@ -94,6 +96,7 @@ local function collectVendingData()
         playerName = playerName,
         isOwner = isOwner,
         scanTime = os.date("%Y-%m-%d %H:%M:%S UTC"),
+        timestamp = os.time(),
         islands = {}
     }
     
@@ -153,8 +156,11 @@ local function collectVendingData()
                         blockName = block.Name,
                         vendingType = vendingType,
                         modeValue = modeValue,
+                        modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN"),
                         itemName = finalItemName,
-                        price = priceValue
+                        price = priceValue,
+                        hasTransactionPrice = transactionPrice ~= nil,
+                        hasMode = mode ~= nil
                     })
                     
                     local modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN")
@@ -177,8 +183,8 @@ local function collectVendingData()
     return allData
 end
 
--- Function to send data as a file to the webhook
-local function sendToWebhook(data)
+-- Send JSON data to local server
+local function sendToLocalServer(data)
     if not data or #data.islands == 0 then
         warn("No vending data found to send!")
         return false
@@ -186,62 +192,83 @@ local function sendToWebhook(data)
     
     -- Convert data to JSON string
     local jsonString = HttpService:JSONEncode(data)
+    local fileSize = #jsonString
     
-    -- Create filename with timestamp
-    local fileName = string.format("vending_data_%s_%s.json", playerName, os.date("%Y-%m-%d_%H-%M-%S"))
+    print(string.format("\n📦 JSON Size: %.2f KB", fileSize / 1024))
+    print("📡 Sending to local server: " .. localServerURL)
     
-    -- Write file using writefile (if available) or just use the string directly
-    local fileContent = jsonString
+    -- Try multiple methods to send data
     
-    -- Get file size
-    local fileSize = #fileContent
-    print(string.format("\n📁 File size: %.2f KB", fileSize / 1024))
-    
-    -- Create multipart form data
-    local boundary = "----LuaBoundary" .. HttpService:GenerateGUID(false)
-    local body = "--" .. boundary .. "\r\n"
-        .. "Content-Disposition: form-data; name=\"file\"; filename=\"" .. fileName .. "\"\r\n"
-        .. "Content-Type: application/json\r\n\r\n"
-        .. fileContent .. "\r\n"
-        .. "--" .. boundary .. "--"
-    
-    -- Send the request
+    -- Method 1: Using request() (works in most cases)
     local success, response = pcall(function()
         return request({
-            Url = webhookURL,
+            Url = localServerURL,
             Method = "POST",
             Headers = {
-                ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
+                ["Content-Type"] = "application/json",
+                ["Content-Length"] = tostring(fileSize)
             },
-            Body = body,
+            Body = jsonString
         })
     end)
     
     if success and response then
-        if response.StatusCode == 200 or response.StatusCode == 204 then
-            print("✓ Data successfully sent to Discord webhook!")
-            print("  File: " .. fileName)
-            print("  Size: " .. string.format("%.2f KB", fileSize / 1024))
-            print("  Islands: " .. #data.islands)
-            
-            local totalVendings = 0
-            for _, island in ipairs(data.islands) do
-                totalVendings = totalVendings + #island.vendings
-            end
-            print("  Total Vendings: " .. totalVendings)
+        if response.StatusCode == 200 or response.StatusCode == 201 or response.StatusCode == 204 then
+            print("✓ Data successfully sent to local server!")
+            print("  Response: " .. (response.Body or "OK"))
             return true
         else
-            warn("✗ Failed to send data. Status Code: " .. tostring(response.StatusCode))
+            warn("✗ Server returned status code: " .. tostring(response.StatusCode))
+            warn("  Response: " .. tostring(response.Body))
             return false
         end
+    end
+    
+    -- Method 2: Try using HttpService:PostAsync (fallback)
+    print("\n🔄 Trying alternative method (PostAsync)...")
+    local postSuccess, postResponse = pcall(function()
+        return HttpService:PostAsync(localServerURL, jsonString, Enum.HttpContentType.ApplicationJson)
+    end)
+    
+    if postSuccess then
+        print("✓ Data sent successfully via PostAsync!")
+        return true
     else
-        warn("✗ Request failed: " .. tostring(response))
+        warn("✗ Failed to send data: " .. tostring(postResponse))
         return false
     end
 end
 
--- Also send a summary message
-local function sendSummaryMessage(data)
+-- Also save to a local file if writefile is available
+local function saveToLocalFile(data)
+    if not data or #data.islands == 0 then
+        return false
+    end
+    
+    local jsonString = HttpService:JSONEncode(data)
+    local fileName = string.format("vending_data_%s_%s.json", playerName, os.date("%Y-%m-%d_%H-%M-%S"))
+    
+    -- Check if writefile is available (Synapse X, Krnl, ScriptWare, etc.)
+    if writefile then
+        local success, err = pcall(function()
+            writefile(fileName, jsonString)
+        end)
+        
+        if success then
+            print("✓ Data saved to local file: " .. fileName)
+            return true
+        else
+            warn("Failed to save file: " .. tostring(err))
+            return false
+        end
+    else
+        print("⚠️ writefile not available - file not saved locally")
+        return false
+    end
+end
+
+-- Print data summary to console
+local function printSummary(data)
     if not data or #data.islands == 0 then
         return
     end
@@ -251,45 +278,38 @@ local function sendSummaryMessage(data)
         totalVendings = totalVendings + #island.vendings
     end
     
-    local summaryText = string.format(
-        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nScan Time: %s\nIslands Scanned: %d\nTotal Vendings Found: %d\n```\n📁 **Full JSON file attached above**",
-        data.uuid,
-        data.playerName,
-        data.isOwner and "✅ YES" or "❌ NO",
-        data.scanTime,
-        #data.islands,
-        totalVendings
-    )
+    print("\n" .. string.rep("=", 60))
+    print("                 DATA SUMMARY")
+    print(string.rep("=", 60))
+    print("UUID: " .. data.uuid)
+    print("Player: " .. data.playerName)
+    print("Owner: " .. (data.isOwner and "YES" or "NO"))
+    print("Scan Time: " .. data.scanTime)
+    print("Islands Scanned: " .. #data.islands)
+    print("Total Vendings: " .. totalVendings)
+    print(string.rep("=", 60))
     
-    local summaryData = {
-        content = summaryText,
-        username = data.isOwner and "OWNER SCANNER" or "Vending Scanner"
-    }
-    
-    local success, response = pcall(function()
-        return request({
-            Url = webhookURL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = HttpService:JSONEncode(summaryData)
-        })
-    end)
-    
-    if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
-        print("✓ Summary message sent to Discord!")
-    else
-        warn("Failed to send summary message")
+    for _, island in ipairs(data.islands) do
+        print(string.format("\n🏝️ Island: %s", island.islandId))
+        print(string.format("   Vendings: %d", #island.vendings))
+        for _, vending in ipairs(island.vendings) do
+            print(string.format("   • Block %d: %s [%s] - %s coins",
+                vending.blockIndex,
+                vending.itemName,
+                vending.modeText,
+                tostring(vending.price or "N/A")))
+        end
     end
+    print(string.rep("=", 60))
 end
 
 -- Main execution
 print("\n" .. string.rep("=", 60))
-print("         VENDING SCANNER - FILE UPLOAD MODE")
+print("      VENDING SCANNER - LOCAL SERVER MODE")
 print(string.rep("=", 60))
 print("Player: " .. playerName)
 print("Owner Status: " .. (isOwner and "OWNER" or "Regular Player"))
+print("Local Server URL: " .. localServerURL)
 print(string.rep("=", 60))
 
 -- Collect all vending data
@@ -297,16 +317,26 @@ local vendingData = collectVendingData()
 
 if vendingData and #vendingData.islands > 0 then
     print("\n" .. string.rep("-", 60))
-    print("SENDING DATA TO DISCORD...")
+    print("SENDING JSON DATA TO LOCAL SERVER...")
     print(string.rep("-", 60))
     
-    -- Send the JSON file
-    local fileSent = sendToWebhook(vendingData)
+    -- Print summary to console
+    printSummary(vendingData)
     
-    if fileSent then
-        wait(1)
-        -- Send summary message
-        sendSummaryMessage(vendingData)
+    -- Send to local server
+    local sent = sendToLocalServer(vendingData)
+    
+    -- Also save to local file if possible
+    saveToLocalFile(vendingData)
+    
+    if sent then
+        print("\n✅ SUCCESS: JSON data sent to local server!")
+    else
+        print("\n❌ FAILED: Could not send data to local server")
+        print("\nMake sure your local server is running:")
+        print("1. Start your local HTTP server on port 3000")
+        print("2. Ensure the endpoint '/api/vending' exists")
+        print("3. Check firewall settings if using network IP")
     end
 else
     print("\n❌ No vending machines found in any island!")
