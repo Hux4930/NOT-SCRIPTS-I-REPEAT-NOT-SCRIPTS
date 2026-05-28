@@ -54,7 +54,7 @@ end
 local allIslandsData = {}
 local webhookURL = "https://discord.com/api/webhooks/1509639034350080081/jXVC5Ygd3LhuKE7-abZIsZ4oNlhdpK3DqTxCHAunfaeVQjD07hHMH_ulR9QGhNGo66Km"
 
-print("=== SCANNING ALL PLAYER ISLANDS ===")
+print("=== AUTO SCANNING ALL PLAYER ISLANDS ===")
 print("Player:", playerName)
 print("Owner Status:", isOwner and "OWNER" or "Not Owner")
 
@@ -96,15 +96,11 @@ end
 local function scanIsland(island, islandId)
     local blocks = island:FindFirstChild("Blocks")
     if not blocks then
-        print("  No Blocks folder found in island: " .. islandId)
         return nil
     end
     
     local islandResults = {}
     local blockIndex = 0
-    
-    print(string.format("\n📦 Scanning Island: %s", islandId))
-    print("  Total blocks: " .. tostring(#blocks:GetChildren()))
     
     for _, block in ipairs(blocks:GetChildren()) do
         blockIndex = blockIndex + 1
@@ -155,42 +151,44 @@ local function scanIsland(island, islandId)
                 hasMode = mode ~= nil,
                 hasSellingContents = sellingContents ~= nil
             })
-            
-            local modeText = modeValue == 0 and "BUY" or (modeValue == 1 and "SELL" or "UNKNOWN")
-            print(string.format("    [%s] Block %d: %s | Item: %s | Price: %s",
-                vendingType,
-                blockIndex,
-                block.Name,
-                finalItemName,
-                tostring(priceValue or "N/A")))
         end
-    end
-    
-    if #islandResults > 0 then
-        print(string.format("  ✓ Found %d vending machines in island %s", #islandResults, islandId))
-    else
-        print(string.format("  ✗ No vending machines found in island %s", islandId))
     end
     
     return islandResults
 end
 
--- Scan ALL islands
-print("\n🔍 Scanning for islands...")
+-- Scan ALL islands automatically
+print("\n🔍 Auto-detecting and scanning all islands...")
 
 for _, island in ipairs(islandsContainer:GetChildren()) do
     -- Check if it's an island (has Blocks folder)
     if island:FindFirstChild("Blocks") then
         local islandId = string.gsub(island.Name, "-island$", "")
+        print("\n📦 Scanning Island: " .. islandId)
+        
         local islandData = scanIsland(island, islandId)
         
         if islandData and #islandData > 0 then
+            print("  ✓ Found " .. #islandData .. " vending machines")
+            
+            -- Print each vending machine found
+            for _, vending in ipairs(islandData) do
+                local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
+                print(string.format("    - Block %d: %s [%s] - %s coins", 
+                    vending.blockIndex,
+                    vending.itemName,
+                    modeText,
+                    tostring(vending.price or "N/A")))
+            end
+            
             table.insert(allIslandsData, {
                 islandId = islandId,
                 islandName = island.Name,
                 totalVendings = #islandData,
                 vendings = islandData
             })
+        else
+            print("  ✗ No vending machines found")
         end
     end
 end
@@ -198,7 +196,7 @@ end
 -- Send data to Discord
 local function sendToDiscord()
     if #allIslandsData == 0 then
-        print("No vending data found in any island!")
+        print("\n❌ No vending data found in any island!")
         return false
     end
     
@@ -214,16 +212,14 @@ local function sendToDiscord()
     -- Create summary of all islands
     local islandSummary = ""
     for i, island in ipairs(allIslandsData) do
-        islandSummary = islandSummary .. string.format("\n%d. Island: %s (%d vendings)", 
-            i, 
-            island.islandId, 
-            island.totalVendings)
+        islandSummary = islandSummary .. string.format("\n\n🏝️ Island %d: %s", i, island.islandId)
+        islandSummary = islandSummary .. string.format("\n   Total Vendings: %d", island.totalVendings)
+        islandSummary = islandSummary .. "\n   Items:"
         
-        -- List items in this island
         for j, vending in ipairs(island.vendings) do
             local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-            islandSummary = islandSummary .. string.format("\n   - Block %d: %s (%s) - %s coins", 
-                vending.blockIndex,
+            islandSummary = islandSummary .. string.format("\n     %d. %s - %s (%s coins)", 
+                j,
                 vending.itemName,
                 modeText,
                 tostring(vending.price or "N/A"))
@@ -231,7 +227,7 @@ local function sendToDiscord()
     end
     
     local summaryText = string.format(
-        "**📊 ALL ISLANDS VENDING SCANNER RESULTS**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nTotal Islands Scanned: %d\nTotal Vendings Found: %d\n\n📦 ISLANDS SCANNED:%s\n```",
+        "**📊 ALL ISLANDS VENDING SCANNER RESULTS**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nTotal Islands Scanned: %d\nTotal Vendings Found: %d\n%s\n```",
         uuid,
         playerName,
         isOwner and "✅ YES" or "❌ NO",
@@ -252,7 +248,7 @@ local function sendToDiscord()
     
     if not success then
         warn("Failed to send summary: " .. tostring(response))
-        print("Make sure HTTP Requests are enabled in Game Settings > Security")
+        print("\n⚠️ Make sure HTTP Requests are enabled in Game Settings > Security")
         return false
     end
     
@@ -261,23 +257,22 @@ local function sendToDiscord()
     
     -- Send each island's data separately
     for _, island in ipairs(allIslandsData) do
-        local islandText = string.format(
-            "**🏝️ Island: %s**\n```\nIsland ID: %s\nTotal Vendings: %d\n\nVending Machines:\n",
-            island.islandName,
-            island.islandId,
-            island.totalVendings
-        )
-        
+        local vendingList = ""
         for _, vending in ipairs(island.vendings) do
             local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-            islandText = islandText .. string.format("\n[%s] Block %d: %s - %s coins",
-                modeText,
+            vendingList = vendingList .. string.format("\n• Block %d: **%s** [%s] - %s coins",
                 vending.blockIndex,
                 vending.itemName,
+                modeText,
                 tostring(vending.price or "N/A"))
         end
         
-        islandText = islandText .. "\n```"
+        local islandText = string.format(
+            "**🏝️ Island Found**\n```\nIsland ID: %s\nTotal Vendings: %d\n\nVending Machines:%s\n```",
+            island.islandId,
+            island.totalVendings,
+            vendingList
+        )
         
         local islandData = {
             content = islandText,
@@ -344,38 +339,46 @@ local function sendToDiscord()
 end
 
 -- Main execution
-print("\n=== AUTO SCANNING ALL PLAYER ISLANDS ===")
-print("Scanning all islands in workspace.Islands...")
+print("\n" .. string.rep("=", 50))
+print("AUTO VENDING SCANNER - SCANNING ALL ISLANDS")
+print(string.rep("=", 50))
 
 -- Send the data
 local sendSuccess = sendToDiscord()
 if sendSuccess then
-    print("\n✓✓✓ ALL DATA SENT SUCCESSFULLY! ✓✓✓")
-    print("  Total islands scanned: " .. #allIslandsData)
+    print("\n" .. string.rep("✓", 50))
+    print("ALL DATA SENT SUCCESSFULLY!")
+    print(string.rep("✓", 50))
+    print("Total islands scanned: " .. #allIslandsData)
     
     local totalVendings = 0
     for _, island in ipairs(allIslandsData) do
         totalVendings = totalVendings + island.totalVendings
     end
-    print("  Total vendings found: " .. totalVendings)
+    print("Total vendings found: " .. totalVendings)
     
     for _, island in ipairs(allIslandsData) do
-        print(string.format("\n  🏝️ Island: %s", island.islandId))
-        print(string.format("     Vendings: %d", island.totalVendings))
+        print(string.format("\n🏝️ Island: %s", island.islandId))
+        print(string.format("   Vendings: %d", island.totalVendings))
         for _, vending in ipairs(island.vendings) do
             local modeText = vending.modeValue == 0 and "BUY" or (vending.modeValue == 1 and "SELL" or "UNKNOWN")
-            print(string.format("     - %s: %s (%s coins)", 
+            print(string.format("   - %s: %s (%s coins)", 
                 vending.itemName, 
                 modeText, 
                 tostring(vending.price or "N/A")))
         end
     end
 else
-    print("\n✗ Failed to send data to Discord")
+    print("\n" .. string.rep("✗", 50))
+    print("FAILED TO SEND DATA TO DISCORD")
+    print(string.rep("✗", 50))
     print("Make sure:")
     print("1. HTTP Requests are enabled in Game Settings > Security")
     print("2. The webhook URL is valid")
     print("3. You're running this as a LocalScript")
+    print("4. You have islands in workspace.Islands")
 end
 
-print("\n=== SCANNER FINISHED ===")
+print("\n" .. string.rep("=", 50))
+print("SCANNER FINISHED")
+print(string.rep("=", 50))
