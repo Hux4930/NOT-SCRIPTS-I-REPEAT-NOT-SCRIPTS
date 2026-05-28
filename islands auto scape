@@ -12,7 +12,6 @@ local function checkForOwnerImage()
     local hasOwnerImage = false
     local ownerName = nil
     
-    -- Check the specific path
     local roactTree = workspace:FindFirstChild("swchy_7")
     if roactTree then
         roactTree = roactTree:FindFirstChild("RoactTree")
@@ -23,7 +22,6 @@ local function checkForOwnerImage()
                 if level2 then
                     local level3 = level2:FindFirstChild("1")
                     if level3 then
-                        -- Check for image with specific asset ID
                         local imageLabel = level3:FindFirstChildWhichIsA("ImageLabel")
                         if imageLabel then
                             local imageId = imageLabel.Image
@@ -45,31 +43,21 @@ end
 -- Check for owner image
 local isOwner, ownerName = checkForOwnerImage()
 
--- Auto-find the island in workspace (allow specific island or find first)
+-- Find the island
 local islandsContainer = workspace:FindFirstChild("Islands")
 if not islandsContainer then
     warn("No Islands folder found in workspace!")
     return
 end
 
--- Get the island (priority to specific ID or find first)
 local targetIsland = nil
 local islandId = nil
-local specificIslandId = "dca2681d-a28a-419f-9d86-a0a4746ce155" -- Your specific island ID
 
--- Try to get specific island first
-targetIsland = islandsContainer:FindFirstChild(specificIslandId .. "-island")
-if targetIsland then
-    islandId = specificIslandId
-    print("Found specific island:", targetIsland.Name)
-else
-    -- Fall back to first available island
-    for _, island in ipairs(islandsContainer:GetChildren()) do
-        if island:FindFirstChild("Blocks") then
-            targetIsland = island
-            islandId = string.gsub(island.Name, "-island$", "")
-            break
-        end
+for _, island in ipairs(islandsContainer:GetChildren()) do
+    if island:FindFirstChild("Blocks") then
+        targetIsland = island
+        islandId = string.gsub(island.Name, "-island$", "")
+        break
     end
 end
 
@@ -86,7 +74,29 @@ print("Found island:", targetIsland.Name, "| ID:", islandId)
 print("Player:", playerName)
 print("Owner Status:", isOwner and "OWNER" or "Not Owner")
 
--- Function to generate random 10-letter UUID
+-- Test webhook connection first
+local function testWebhook()
+    local http = game:GetService("HttpService")
+    local testData = {
+        content = "🔍 Vending Scanner is online! Testing connection...",
+        username = "Vending Scanner"
+    }
+    
+    local success, response = pcall(function()
+        return http:PostAsync(webhookURL, http:JSONEncode(testData), Enum.HttpContentType.ApplicationJson)
+    end)
+    
+    if success then
+        print("✓ Webhook connection successful!")
+        return true
+    else
+        warn("✗ Webhook connection failed: " .. tostring(response))
+        print("Make sure HTTP requests are enabled in Game Settings > Security")
+        return false
+    end
+end
+
+-- Generate random UUID
 local function generateUUID()
     local letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     local uuid = ""
@@ -97,7 +107,7 @@ local function generateUUID()
     return uuid
 end
 
--- Function to check if it's a buy vending (with vendingMachine1)
+-- Check for buy vending at specific block
 local function checkBuyVending(block)
     local sellingContents = block:FindFirstChild("SellingContents")
     if sellingContents then
@@ -113,29 +123,29 @@ local function checkBuyVending(block)
     return false, nil, nil
 end
 
--- Scan ALL vending blocks
+-- Scan all vending blocks
 local blockIndex = 0
+local buyVendingFound = false
+
 for _, block in ipairs(blocks:GetChildren()) do
     blockIndex = blockIndex + 1
     local name = string.lower(block.Name or "")
     
-    -- Check for specific block at index 2103 (for buy mode detection)
-    local isSpecificBuyBlock = false
-    local specificAmount = nil
-    local specificDisplayName = nil
+    -- Check for buy vending at index 2103
+    local isBuyVending = false
+    local buyAmount = nil
+    local buyDisplayName = nil
     
     if blockIndex == 2103 then
-        -- Check the specific block for buy vending structure
-        isSpecificBuyBlock, specificAmount, specificDisplayName = checkBuyVending(block)
-        if isSpecificBuyBlock then
-            print("✓ Found BUY vending at block index 2103!")
-            print("  Amount: " .. tostring(specificAmount))
-            print("  DisplayName: " .. tostring(specificDisplayName))
+        isBuyVending, buyAmount, buyDisplayName = checkBuyVending(block)
+        if isBuyVending then
+            buyVendingFound = true
+            print("✓ Found BUY vending at block 2103!")
         end
     end
     
-    -- Check for regular vending blocks
-    if string.find(name, "vending") or isSpecificBuyBlock then
+    -- Check for sell vending
+    if string.find(name, "vending") or isBuyVending then
         
         local transactionPrice = block:FindFirstChild("TransactionPrice")
         local mode = block:FindFirstChild("Mode")
@@ -143,16 +153,16 @@ for _, block in ipairs(blocks:GetChildren()) do
         local displayName = nil
         local priceValue = nil
         local modeValue = nil
-        local vendingType = "SELL" -- Default to sell
+        local vendingType = "UNKNOWN"
         
-        -- If it's the specific buy block, use that data
-        if isSpecificBuyBlock and blockIndex == 2103 then
-            displayName = specificDisplayName
-            priceValue = specificAmount
+        -- Handle buy vending
+        if isBuyVending and blockIndex == 2103 then
+            displayName = buyDisplayName
+            priceValue = buyAmount
             modeValue = "Buy"
             vendingType = "BUY"
         else
-            -- Regular sell vending detection
+            -- Handle sell vending
             if transactionPrice then
                 priceValue = transactionPrice.Value
             end
@@ -161,7 +171,6 @@ for _, block in ipairs(blocks:GetChildren()) do
                 modeValue = mode.Value
             end
             
-            -- Get item name from crateMetalPineapple
             if sellingContents then
                 local crate = sellingContents:FindFirstChild("crateMetalPineapple")
                 if crate and crate:FindFirstChild("DisplayName") then
@@ -171,125 +180,153 @@ for _, block in ipairs(blocks:GetChildren()) do
             end
         end
         
-        -- Add vending block to results
+        -- Add to results
         table.insert(results, {
             blockIndex = blockIndex,
             blockName = block.Name,
             vendingType = vendingType,
             itemName = displayName or "Unknown",
             price = priceValue,
-            mode = modeValue or (vendingType == "BUY" and "Buy" or "Unknown"),
-            isSpecialBuyBlock = (blockIndex == 2103 and isSpecificBuyBlock),
-            hasPrice = transactionPrice ~= nil or (blockIndex == 2103 and specificAmount ~= nil),
-            hasMode = mode ~= nil or (blockIndex == 2103),
-            hasItem = displayName ~= nil
+            mode = modeValue or "Unknown",
+            isSpecialBuyBlock = (blockIndex == 2103 and isBuyVending)
         })
         
-        print(string.format("[%s] Block %d: %s | Type: %s | Item: %s | Price: %s | Mode: %s",
-            vendingType,
+        print(string.format("Found: %s at block %d | Price: %s | Mode: %s",
+            displayName or block.Name,
             blockIndex,
-            block.Name,
-            vendingType,
-            displayName or "MISSING",
-            tostring(priceValue or "MISSING"),
-            modeValue or "MISSING"))
+            tostring(priceValue or "N/A"),
+            modeValue or "N/A"))
     end
 end
 
--- Function to create JSON file and send to Discord (fixed for HTTP requests)
-local function sendJSONToDiscord()
-    if #results == 0 then
-        print("No vending blocks found at all!")
-        return
-    end
-    
+-- Send data to Discord
+local function sendToDiscord()
     local http = game:GetService("HttpService")
     local uuid = generateUUID()
     
-    -- Prepare the complete data structure with owner info
+    -- Create summary message
+    local summaryText = string.format(
+        "**📊 Vending Scanner Results**\n```\nUUID: %s\nPlayer: %s\nOwner: %s\nIsland: %s\nTotal Vendings: %d\nBuy Vending Found: %s\n```",
+        uuid,
+        playerName,
+        isOwner and "✅ YES" or "❌ NO",
+        islandId or "Unknown",
+        #results,
+        buyVendingFound and "✅ YES (Block 2103)" or "❌ NO"
+    )
+    
+    -- Send summary
+    local summaryData = {
+        content = summaryText,
+        username = isOwner and "OWNER SCANNER" or "Vending Scanner"
+    }
+    
+    local success, response = pcall(function()
+        return http:PostAsync(webhookURL, http:JSONEncode(summaryData), Enum.HttpContentType.ApplicationJson)
+    end)
+    
+    if not success then
+        warn("Failed to send summary: " .. tostring(response))
+        return false
+    end
+    
+    wait(1)
+    
+    -- Send each vending item individually
+    for _, vending in ipairs(results) do
+        local itemText = string.format(
+            "**🛒 Vending Item**\n```\nType: %s\nBlock Index: %d\nItem: %s\nPrice: %s\nMode: %s\n```",
+            vending.vendingType,
+            vending.blockIndex,
+            vending.itemName,
+            tostring(vending.price or "N/A"),
+            vending.mode
+        )
+        
+        local itemData = {
+            content = itemText,
+            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
+        }
+        
+        local itemSuccess = pcall(function()
+            return http:PostAsync(webhookURL, http:JSONEncode(itemData), Enum.HttpContentType.ApplicationJson)
+        end)
+        
+        if itemSuccess then
+            print("Sent item: " .. vending.itemName)
+        else
+            warn("Failed to send item: " .. vending.itemName)
+        end
+        
+        wait(0.5) -- Rate limit protection
+    end
+    
+    -- Send full JSON as a code block
     local jsonDataStructure = {
         uuid = uuid,
         playerName = playerName,
         isOwner = isOwner,
-        ownerName = isOwner and ownerName or nil,
         islandId = islandId,
         scanTime = os.date("!%Y-%m-%d %H:%M:%S UTC"),
         totalVendingsFound = #results,
+        buyVendingFound = buyVendingFound,
         vendings = results
     }
     
-    -- Encode to JSON
     local jsonString = http:JSONEncode(jsonDataStructure)
     
-    -- Send as JSON file using simple POST with file attachment workaround
-    -- Discord webhooks accept raw JSON in the body with a file attachment
-    local success, response = pcall(function()
-        -- Create a simple text message with the JSON as a code block (fallback)
-        -- Some Roblox versions don't support MultipartFormData properly
-        local message = {
-            content = string.format(
-                "```json\n%s\n```",
-                string.sub(jsonString, 1, 1900) -- Discord limit for message content
-            ),
-            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
-        }
+    -- Split JSON into chunks if too long
+    local maxLength = 1900
+    if #jsonString > maxLength then
+        local chunks = {}
+        for i = 1, #jsonString, maxLength do
+            table.insert(chunks, string.sub(jsonString, i, i + maxLength - 1))
+        end
         
-        -- Also send the full JSON as an attachment using a different method
-        -- Create a temporary message with the JSON data
-        local fullDataMessage = {
-            content = string.format(
-                "**Vending Data - %s**\nPlayer: %s\nOwner: %s\nTotal Vendings: %d\n\n📄 Full data below:",
-                uuid,
-                playerName,
-                isOwner and "YES" or "NO",
-                #results
-            ),
-            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
-        }
-        
-        -- Send the summary first
-        http:PostAsync(webhookURL, http:JSONEncode(fullDataMessage), Enum.HttpContentType.ApplicationJson)
-        
-        -- Wait a bit
-        wait(1)
-        
-        -- Send the actual JSON data in chunks if needed
-        local chunkSize = 1900
-        for i = 1, #jsonString, chunkSize do
-            local chunk = string.sub(jsonString, i, math.min(i + chunkSize - 1, #jsonString))
-            local chunkMessage = {
+        for i, chunk in ipairs(chunks) do
+            local chunkData = {
                 content = string.format("```json\n%s\n```", chunk),
                 username = isOwner and "OWNER SCANNER" or "Vending Scanner"
             }
-            http:PostAsync(webhookURL, http:JSONEncode(chunkMessage), Enum.HttpContentType.ApplicationJson)
-            wait(0.5) -- Rate limiting
-        end
-        
-        return true
-    end)
-    
-    if success then
-        print("✓ JSON data sent successfully!")
-        print("  UUID: " .. uuid)
-        print("  Total vendings: " .. #results)
-        
-        -- Send owner status highlight
-        if isOwner then
-            local ownerAlert = {
-                content = "🔥 **OWNER DETECTED!** 🔥\nPlayer: " .. playerName .. " has the owner image!",
-                username = "OWNER ALERT"
-            }
             pcall(function()
-                http:PostAsync(webhookURL, http:JSONEncode(ownerAlert), Enum.HttpContentType.ApplicationJson)
+                http:PostAsync(webhookURL, http:JSONEncode(chunkData), Enum.HttpContentType.ApplicationJson)
             end)
+            wait(0.5)
         end
     else
-        warn("✗ Failed to send JSON data: " .. tostring(response))
+        local fullData = {
+            content = string.format("```json\n%s\n```", jsonString),
+            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
+        }
+        pcall(function()
+            http:PostAsync(webhookURL, http:JSONEncode(fullData), Enum.HttpContentType.ApplicationJson)
+        end)
     end
+    
+    return true
 end
 
--- Send ALL data
-print("\n=== SCANNING VENDING BLOCKS ===")
-print("Checking for block index 2103 (Buy vending detection)...")
-sendJSONToDiscord()
-print("=============================")
+-- Main execution
+print("\n=== VENDING SCANNER STARTED ===")
+
+-- Test webhook first
+local webhookWorks = testWebhook()
+if not webhookWorks then
+    print("⚠️ Webhook test failed! Check if HTTP Requests are enabled in Game Settings")
+    print("Go to Game Settings > Security > Allow HTTP Requests (must be enabled)")
+    return
+end
+
+wait(1)
+
+-- Send the data
+local sendSuccess = sendToDiscord()
+if sendSuccess then
+    print("✓ All data sent successfully!")
+    print("  Total items sent: " .. #results)
+    print("  Buy vending at block 2103: " .. (buyVendingFound and "YES" or "NO"))
+else
+    print("✗ Failed to send data to Discord")
+end
+
+print("=== SCANNER FINISHED ===")
