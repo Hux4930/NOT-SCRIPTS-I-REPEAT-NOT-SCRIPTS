@@ -784,7 +784,7 @@ local function StartOreAura()
                             (hrp2.Position - targetCFrame.Position).Magnitude
 
                         local tweenInfo2 =
-                            TweenInfo.new(dist2 / 30, Enum.EasingStyle.Linear)
+                            TweenInfo.new(math.max((hrp2.Position - targetCFrame.Position).Magnitude / 30, 0.01), Enum.EasingStyle.Linear)
 
                         local moveTween =
                             TweenService:Create(
