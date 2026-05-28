@@ -11,8 +11,8 @@ end
 local playerName = player.Name
 
 -- Your local server IP and port
-local localIP = "192.168.0.76"
-local localPort = 3000
+local localIP = "100.119.217.108"
+local localPort = 6712
 local webhookURL = "http://" .. localIP .. ":" .. localPort .. "/api/vending"
 
 print("📡 Sending to: " .. webhookURL)
