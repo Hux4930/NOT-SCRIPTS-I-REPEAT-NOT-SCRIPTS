@@ -45,22 +45,31 @@ end
 -- Check for owner image
 local isOwner, ownerName = checkForOwnerImage()
 
--- Auto-find the island in workspace
+-- Auto-find the island in workspace (allow specific island or find first)
 local islandsContainer = workspace:FindFirstChild("Islands")
 if not islandsContainer then
     warn("No Islands folder found in workspace!")
     return
 end
 
--- Get the first island
+-- Get the island (priority to specific ID or find first)
 local targetIsland = nil
 local islandId = nil
+local specificIslandId = "dca2681d-a28a-419f-9d86-a0a4746ce155" -- Your specific island ID
 
-for _, island in ipairs(islandsContainer:GetChildren()) do
-    if island:FindFirstChild("Blocks") then
-        targetIsland = island
-        islandId = string.gsub(island.Name, "-island$", "")
-        break
+-- Try to get specific island first
+targetIsland = islandsContainer:FindFirstChild(specificIslandId .. "-island")
+if targetIsland then
+    islandId = specificIslandId
+    print("Found specific island:", targetIsland.Name)
+else
+    -- Fall back to first available island
+    for _, island in ipairs(islandsContainer:GetChildren()) do
+        if island:FindFirstChild("Blocks") then
+            targetIsland = island
+            islandId = string.gsub(island.Name, "-island$", "")
+            break
+        end
     end
 end
 
@@ -88,11 +97,45 @@ local function generateUUID()
     return uuid
 end
 
--- Scan ALL vending blocks (including those with nil values)
-for _, block in ipairs(blocks:GetChildren()) do
-    local name = string.lower(block.Name or "")
+-- Function to check if it's a buy vending (with vendingMachine1)
+local function checkBuyVending(block)
+    local sellingContents = block:FindFirstChild("SellingContents")
+    if sellingContents then
+        local vendingMachine = sellingContents:FindFirstChild("vendingMachine1")
+        if vendingMachine then
+            local amount = vendingMachine:FindFirstChild("Amount")
+            local displayName = vendingMachine:FindFirstChild("DisplayName")
+            if amount and displayName then
+                return true, amount.Value, displayName.Value
+            end
+        end
+    end
+    return false, nil, nil
+end
 
-    if string.find(name, "vending") then
+-- Scan ALL vending blocks
+local blockIndex = 0
+for _, block in ipairs(blocks:GetChildren()) do
+    blockIndex = blockIndex + 1
+    local name = string.lower(block.Name or "")
+    
+    -- Check for specific block at index 2103 (for buy mode detection)
+    local isSpecificBuyBlock = false
+    local specificAmount = nil
+    local specificDisplayName = nil
+    
+    if blockIndex == 2103 then
+        -- Check the specific block for buy vending structure
+        isSpecificBuyBlock, specificAmount, specificDisplayName = checkBuyVending(block)
+        if isSpecificBuyBlock then
+            print("✓ Found BUY vending at block index 2103!")
+            print("  Amount: " .. tostring(specificAmount))
+            print("  DisplayName: " .. tostring(specificDisplayName))
+        end
+    end
+    
+    -- Check for regular vending blocks
+    if string.find(name, "vending") or isSpecificBuyBlock then
         
         local transactionPrice = block:FindFirstChild("TransactionPrice")
         local mode = block:FindFirstChild("Mode")
@@ -100,45 +143,60 @@ for _, block in ipairs(blocks:GetChildren()) do
         local displayName = nil
         local priceValue = nil
         local modeValue = nil
+        local vendingType = "SELL" -- Default to sell
         
-        -- Get price (keep nil if doesn't exist)
-        if transactionPrice then
-            priceValue = transactionPrice.Value
-        end
-        
-        -- Get mode (keep nil if doesn't exist)
-        if mode then
-            modeValue = mode.Value
-        end
-        
-        -- Get item name (keep nil if doesn't exist)
-        if sellingContents then
-            local crate = sellingContents:FindFirstChild("crateMetalPineapple")
-            if crate and crate:FindFirstChild("DisplayName") then
-                displayName = crate.DisplayName.Value
+        -- If it's the specific buy block, use that data
+        if isSpecificBuyBlock and blockIndex == 2103 then
+            displayName = specificDisplayName
+            priceValue = specificAmount
+            modeValue = "Buy"
+            vendingType = "BUY"
+        else
+            -- Regular sell vending detection
+            if transactionPrice then
+                priceValue = transactionPrice.Value
+            end
+            
+            if mode then
+                modeValue = mode.Value
+            end
+            
+            -- Get item name from crateMetalPineapple
+            if sellingContents then
+                local crate = sellingContents:FindFirstChild("crateMetalPineapple")
+                if crate and crate:FindFirstChild("DisplayName") then
+                    displayName = crate.DisplayName.Value
+                    vendingType = "SELL"
+                end
             end
         end
         
-        -- Add ALL vending blocks to results (including those with nil values)
+        -- Add vending block to results
         table.insert(results, {
+            blockIndex = blockIndex,
             blockName = block.Name,
+            vendingType = vendingType,
             itemName = displayName or "Unknown",
             price = priceValue,
-            mode = modeValue or "Unknown",
-            hasPrice = transactionPrice ~= nil,
-            hasMode = mode ~= nil,
+            mode = modeValue or (vendingType == "BUY" and "Buy" or "Unknown"),
+            isSpecialBuyBlock = (blockIndex == 2103 and isSpecificBuyBlock),
+            hasPrice = transactionPrice ~= nil or (blockIndex == 2103 and specificAmount ~= nil),
+            hasMode = mode ~= nil or (blockIndex == 2103),
             hasItem = displayName ~= nil
         })
         
-        print(string.format("Found vending: %s | Item: %s | Price: %s | Mode: %s",
+        print(string.format("[%s] Block %d: %s | Type: %s | Item: %s | Price: %s | Mode: %s",
+            vendingType,
+            blockIndex,
             block.Name,
+            vendingType,
             displayName or "MISSING",
             tostring(priceValue or "MISSING"),
             modeValue or "MISSING"))
     end
 end
 
--- Function to create JSON file and send to Discord
+-- Function to create JSON file and send to Discord (fixed for HTTP requests)
 local function sendJSONToDiscord()
     if #results == 0 then
         print("No vending blocks found at all!")
@@ -163,55 +221,75 @@ local function sendJSONToDiscord()
     -- Encode to JSON
     local jsonString = http:JSONEncode(jsonDataStructure)
     
-    -- Create multipart form data to send as file
-    local boundary = "boundary_" .. tostring(math.random(1000000, 9999999))
-    local fileContent = "--" .. boundary .. "\r\n"
-    fileContent = fileContent .. 'Content-Disposition: form-data; name="file"; filename="vending_data_' .. uuid .. '.json"\r\n'
-    fileContent = fileContent .. "Content-Type: application/json\r\n\r\n"
-    fileContent = fileContent .. jsonString .. "\r\n"
-    fileContent = fileContent .. "--" .. boundary .. "--\r\n"
-    
-    -- Send file to Discord webhook
+    -- Send as JSON file using simple POST with file attachment workaround
+    -- Discord webhooks accept raw JSON in the body with a file attachment
     local success, response = pcall(function()
-        return http:PostAsync(webhookURL, fileContent, Enum.HttpContentType.MultipartFormData, function(generatedBoundary)
-            return boundary
-        end)
-    end)
-    
-    if success then
-        print("✓ JSON file sent successfully!")
-        print("  UUID: " .. uuid)
-        print("  Total vendings: " .. #results)
-        
-        -- Send a simple text confirmation with owner status
-        local ownerStatusText = isOwner and "👑 **OWNER** 👑" or "Regular Player"
-        local confirmMessage = {
+        -- Create a simple text message with the JSON as a code block (fallback)
+        -- Some Roblox versions don't support MultipartFormData properly
+        local message = {
             content = string.format(
-                "%s\n```\nUUID: %s\nPlayer: %s\nStatus: %s\nIsland: %s\nTotal Vendings: %d\nTime: %s\n```\n📁 **Full data in attached JSON file**",
-                isOwner and "🔥 **OWNER DETECTED** 🔥" or "📊 Vending Data Collected",
-                uuid,
-                playerName,
-                ownerStatusText,
-                islandId or "Unknown",
-                #results,
-                os.date("!%Y-%m-%d %H:%M:%S UTC")
+                "```json\n%s\n```",
+                string.sub(jsonString, 1, 1900) -- Discord limit for message content
             ),
             username = isOwner and "OWNER SCANNER" or "Vending Scanner"
         }
         
-        local confirmSuccess = pcall(function()
-            return http:PostAsync(webhookURL, http:JSONEncode(confirmMessage), Enum.HttpContentType.ApplicationJson)
-        end)
+        -- Also send the full JSON as an attachment using a different method
+        -- Create a temporary message with the JSON data
+        local fullDataMessage = {
+            content = string.format(
+                "**Vending Data - %s**\nPlayer: %s\nOwner: %s\nTotal Vendings: %d\n\n📄 Full data below:",
+                uuid,
+                playerName,
+                isOwner and "YES" or "NO",
+                #results
+            ),
+            username = isOwner and "OWNER SCANNER" or "Vending Scanner"
+        }
         
-        if confirmSuccess then
-            print("✓ Confirmation message sent!")
+        -- Send the summary first
+        http:PostAsync(webhookURL, http:JSONEncode(fullDataMessage), Enum.HttpContentType.ApplicationJson)
+        
+        -- Wait a bit
+        wait(1)
+        
+        -- Send the actual JSON data in chunks if needed
+        local chunkSize = 1900
+        for i = 1, #jsonString, chunkSize do
+            local chunk = string.sub(jsonString, i, math.min(i + chunkSize - 1, #jsonString))
+            local chunkMessage = {
+                content = string.format("```json\n%s\n```", chunk),
+                username = isOwner and "OWNER SCANNER" or "Vending Scanner"
+            }
+            http:PostAsync(webhookURL, http:JSONEncode(chunkMessage), Enum.HttpContentType.ApplicationJson)
+            wait(0.5) -- Rate limiting
+        end
+        
+        return true
+    end)
+    
+    if success then
+        print("✓ JSON data sent successfully!")
+        print("  UUID: " .. uuid)
+        print("  Total vendings: " .. #results)
+        
+        -- Send owner status highlight
+        if isOwner then
+            local ownerAlert = {
+                content = "🔥 **OWNER DETECTED!** 🔥\nPlayer: " .. playerName .. " has the owner image!",
+                username = "OWNER ALERT"
+            }
+            pcall(function()
+                http:PostAsync(webhookURL, http:JSONEncode(ownerAlert), Enum.HttpContentType.ApplicationJson)
+            end)
         end
     else
-        warn("✗ Failed to send JSON file: " .. tostring(response))
+        warn("✗ Failed to send JSON data: " .. tostring(response))
     end
 end
 
--- Send ALL data as one JSON file
+-- Send ALL data
 print("\n=== SCANNING VENDING BLOCKS ===")
+print("Checking for block index 2103 (Buy vending detection)...")
 sendJSONToDiscord()
 print("=============================")
