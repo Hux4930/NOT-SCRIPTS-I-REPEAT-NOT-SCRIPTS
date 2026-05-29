@@ -720,114 +720,99 @@ local lastOreScan = 0
 local cachedOres = {}
 
 function StartOreAura()
-    task_spawn(function()
+    task.spawn(function()
+        local lastScan = 0
+        local cachedContainers = {}
+
         while toggleStates.OreAura do
+            task.wait(0.1) -- slower main loop = stability
+
             local char = lp.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-            if not hrp then task_wait(0.01); continue end
+            if not hrp then continue end
 
             if not getgenv().HitAuraKey then
                 SwizUI:Notify("Waiting", "Hit an ore manually once to bypass!")
-                task_wait(3); continue
-            end
-
-            local pickaxe = GetEquippedTool()
-            if not pickaxe then task_wait(0.01); continue end
-
-            -- Rescan every cycle
-            local ores = {}
-            local containers = GetFarmContainers()
-            local hrpPos = hrp.Position -- cache position once
-
-            for _, container in ipairs(containers) do
-                local children = container:GetChildren()
-                for i = 1, #children do
-                    local block = children[i]
-                    if IsAuraOreMatch(block) then
-                        local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
-                        if hitPart and hitPart:IsA("BasePart") then
-                            local dist = (hrpPos - hitPart.Position).Magnitude
-                            if dist <= 15 then -- only collect in-range ores upfront
-                                table_insert(ores, {
-                                    block = block,
-                                    part = hitPart,
-                                    dist = dist
-                                })
-                            end
-                        end
-                    end
-                end
-            end
-
-            if #ores == 0 then
-                -- Nothing in range, tween to nearest ore (rescan without distance filter)
-                local nearest, nearestDist = nil, math.huge
-                for _, container in ipairs(containers) do
-                    for _, block in ipairs(container:GetChildren()) do
-                        if IsAuraOreMatch(block) then
-                            local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
-                            if hitPart and hitPart:IsA("BasePart") then
-                                local d = (hrpPos - hitPart.Position).Magnitude
-                                if d < nearestDist then
-                                    nearestDist = d
-                                    nearest = hitPart
-                                end
-                            end
-                        end
-                    end
-                end
-                if nearest then
-                    local hrp2 = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp2 and nearest.Parent then
-                        local targetCFrame = CFrame.new(nearest.Position + Vector3.new(0, 3, 0))
-                        local duration = math.max((hrp2.Position - targetCFrame.Position).Magnitude / 35, 0.05)
-                        local tween = TweenService:Create(hrp2, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-                        tween:Play()
-                        tween.Completed:Wait()
-                    end
-                end
+                task.wait(2)
                 continue
             end
 
-            -- Sort and take up to 9 closest
-            table_sort(ores, function(a, b) return a.dist < b.dist end)
-            local batch = {}
-            for i = 1, math.min(9, #ores) do
-                batch[i] = ores[i]
+            local pickaxe = GetEquippedTool()
+            if not pickaxe then continue end
+
+            -- cache containers every 2 seconds (NOT every loop)
+            if os.clock() - lastScan > 2 then
+                cachedContainers = GetFarmContainers()
+                lastScan = os.clock()
             end
 
-            -- Fire all 9 in parallel
-            local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
-            if netManaged then
-                netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
-                local blockRemote = netManaged and netManaged:FindFirstChild(BlockHitRemoteName)
+            local ores = {}
+            local hrpPos = hrp.Position
 
-                if blockRemote then
-                    local threads = {}
-                    for _, ore in ipairs(batch) do
-                        if ore.block and ore.block.Parent and ore.part and ore.part.Parent then
-                            threads[#threads + 1] = task_spawn(function()
-                                pcall(function()
-                                    blockRemote:InvokeServer({
-                                        [getgenv().HitAuraKey] = getgenv().HitAuraValue,
-                                        ["part"]  = ore.part,
-                                        ["block"] = ore.block,
-                                        ["norm"]  = ore.part.Position,
-                                        ["pos"]   = Vector3.new(
-                                            math_random(-100, 100) / 100,
-                                            math_random(0,   100) / 100,
-                                            math_random(-100, 100) / 100
-                                        )
-                                    })
-                                end)
-                            end)
+            -- scan cached containers only
+            for i = 1, #cachedContainers do
+                local container = cachedContainers[i]
+                local children = container:GetChildren()
+
+                for j = 1, #children do
+                    local block = children[j]
+                    if IsAuraOreMatch(block) then
+                        local part = block:FindFirstChildWhichIsA("BasePart")
+                        if part then
+                            local dist = (hrpPos - part.Position).Magnitude
+                            if dist <= 18 then
+                                ores[#ores + 1] = {
+                                    block = block,
+                                    part = part,
+                                    dist = dist
+                                }
+                            end
                         end
                     end
                 end
             end
 
-            task_wait(0.05) -- small cooldown between batches
+            table.sort(ores, function(a, b)
+                return a.dist < b.dist
+            end)
+
+            -- move if none found
+            if #ores == 0 then
+                continue
+            end
+
+            local batchSize = math.min(4, #ores) -- reduced from 9 (huge fix)
+            local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+
+            if not netManaged then continue end
+
+            netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+            local blockRemote = netManaged and netManaged:FindFirstChild(BlockHitRemoteName)
+
+            if not blockRemote then continue end
+
+            -- IMPORTANT: no threads, sequential fire
+            for i = 1, batchSize do
+                local ore = ores[i]
+
+                if ore and ore.block and ore.part then
+                    pcall(function()
+                        blockRemote:InvokeServer({
+                            [getgenv().HitAuraKey] = getgenv().HitAuraValue,
+                            part = ore.part,
+                            block = ore.block,
+                            norm = ore.part.Position,
+                            pos = Vector3.new(
+                                math.random(-50, 50) / 100,
+                                math.random(0, 50) / 100,
+                                math.random(-50, 50) / 100
+                            )
+                        })
+                    end)
+                end
+            end
+
+            task.wait(0.15) -- cooldown prevents remote flood
         end
     end)
 end
