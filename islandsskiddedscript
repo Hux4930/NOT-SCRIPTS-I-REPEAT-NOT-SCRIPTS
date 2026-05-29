@@ -743,9 +743,9 @@ function StartOreAura()
                 continue
             end
 
-            -- Scan for ores every 0.3 seconds
+            -- Scan for ores
             local now = tick()
-            if now - lastOreScan >= 0.3 then
+            if now - lastOreScan >= 0.3 or #cachedOres == 0 then
                 lastOreScan = now
                 cachedOres = {}
                 
@@ -802,49 +802,60 @@ function StartOreAura()
             if closestDist <= 15 then
                 -- Mine all ores within 15 studs of current position
                 local minedCount = 0
+                local oresToMine = {}
+                
+                -- Collect all ores within 15 studs
                 for _, ore in ipairs(cachedOres) do
-                    -- Check if ore is still valid and within 15 studs
                     if ore.block and ore.block.Parent and ore.part and ore.part.Parent then
                         local distToOre = (hrp.Position - ore.part.Position).Magnitude
                         
                         if distToOre <= 15 then
-                            -- Mine without tweening (already close enough)
-                            task_spawn(function()
-                                pcall(function()
-                                    local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
-                                    if netManaged then
-                                        netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
-                                        local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
-                                        
-                                        if blockRemote then
-                                            local args = {
-                                                [1] = {
-                                                    [getgenv().HitAuraKey] = getgenv().HitAuraValue,
-                                                    ["part"] = ore.part,
-                                                    ["block"] = ore.block,
-                                                    ["norm"] = ore.part.Position,
-                                                    ["pos"] = Vector3.new(
-                                                        math_random(-100, 100) / 100,
-                                                        math_random(0, 100) / 100,
-                                                        math_random(-100, 100) / 100
-                                                    )
-                                                }
-                                            }
-                                            blockRemote:InvokeServer(unpack(args))
-                                        end
-                                    end
-                                end)
-                            end)
-                            minedCount = minedCount + 1
-                            task_wait(0.03) -- Small delay between hits
+                            table_insert(oresToMine, ore)
                         end
                     end
                 end
                 
+                -- Mine them
+                for _, ore in ipairs(oresToMine) do
+                    if ore.block and ore.block.Parent then
+                        task_spawn(function()
+                            pcall(function()
+                                local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+                                if netManaged then
+                                    netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                                    local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
+                                    
+                                    if blockRemote then
+                                        local args = {
+                                            [1] = {
+                                                [getgenv().HitAuraKey] = getgenv().HitAuraValue,
+                                                ["part"] = ore.part,
+                                                ["block"] = ore.block,
+                                                ["norm"] = ore.part.Position,
+                                                ["pos"] = Vector3.new(
+                                                    math_random(-100, 100) / 100,
+                                                    math_random(0, 100) / 100,
+                                                    math_random(-100, 100) / 100
+                                                )
+                                            }
+                                        }
+                                        blockRemote:InvokeServer(unpack(args))
+                                    end
+                                end
+                            end)
+                        end)
+                        minedCount = minedCount + 1
+                        task_wait(0.03) -- Small delay between hits
+                    end
+                end
+                
                 if minedCount > 0 then
-                    -- Force a rescan after mining multiple ores
+                    -- IMMEDIATELY force a rescan after mining
                     lastOreScan = 0
+                    cachedOres = {}
                     task_wait(0.05)
+                    -- Skip the rest of the loop and immediately scan again
+                    continue
                 end
             else
                 -- Not close enough, tween to the closest ore
@@ -895,6 +906,9 @@ function StartOreAura()
                     end)
                 end)
                 
+                -- Force rescan after tweening and mining
+                lastOreScan = 0
+                cachedOres = {}
                 task_wait(0.05)
             end
         end
