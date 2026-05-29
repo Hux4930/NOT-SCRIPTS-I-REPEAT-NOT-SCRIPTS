@@ -717,6 +717,7 @@ task_spawn(function() while true do pcall(function() UpdateESP() end); task_wait
 
 -- Cache variables outside the function
 local lastOreScan = 0
+local cachedOres = {}
 
 function StartOreAura()
     task_spawn(function()
@@ -742,14 +743,11 @@ function StartOreAura()
                 continue
             end
 
-            local closestBlock = nil
-            local closestHitPart = nil
-            local closestDist = 400
-
-            -- Only do the full container scan every 0.5 seconds
+            -- Scan for ores every 0.3 seconds
             local now = tick()
-            if now - lastOreScan >= 0.5 then
+            if now - lastOreScan >= 0.3 then
                 lastOreScan = now
+                cachedOres = {}
                 
                 local containers = GetFarmContainers()
 
@@ -764,67 +762,141 @@ function StartOreAura()
 
                             if hitPart and hitPart:IsA("BasePart") then
                                 local dist = (hrp.Position - hitPart.Position).Magnitude
-
-                                if dist <= closestDist then
-                                    closestDist = dist
-                                    closestBlock = block
-                                    closestHitPart = hitPart
-                                end
+                                
+                                table_insert(cachedOres, {
+                                    block = block,
+                                    part = hitPart,
+                                    dist = dist
+                                })
                             end
                         end
                     end
                 end
+                
+                -- Sort by distance
+                table_sort(cachedOres, function(a, b)
+                    return a.dist < b.dist
+                end)
             end
-
-            if closestBlock and closestHitPart then
+            
+            -- Remove invalid ores from cache
+            for i = #cachedOres, 1, -1 do
+                local ore = cachedOres[i]
+                if not ore.block or not ore.block.Parent or not ore.part or not ore.part.Parent then
+                    table.remove(cachedOres, i)
+                end
+            end
+            
+            if #cachedOres == 0 then
+                task_wait(0.1)
+                continue
+            end
+            
+            -- Get the closest ore
+            local closestOre = cachedOres[1]
+            
+            -- Update distance to closest ore
+            local closestDist = (hrp.Position - closestOre.part.Position).Magnitude
+            
+            -- If close enough (within 15 studs), mine all nearby ores first
+            if closestDist <= 15 then
+                -- Mine all ores within 15 studs of current position
+                local minedCount = 0
+                for _, ore in ipairs(cachedOres) do
+                    -- Check if ore is still valid and within 15 studs
+                    if ore.block and ore.block.Parent and ore.part and ore.part.Parent then
+                        local distToOre = (hrp.Position - ore.part.Position).Magnitude
+                        
+                        if distToOre <= 15 then
+                            -- Mine without tweening (already close enough)
+                            task_spawn(function()
+                                pcall(function()
+                                    local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+                                    if netManaged then
+                                        netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                                        local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
+                                        
+                                        if blockRemote then
+                                            local args = {
+                                                [1] = {
+                                                    [getgenv().HitAuraKey] = getgenv().HitAuraValue,
+                                                    ["part"] = ore.part,
+                                                    ["block"] = ore.block,
+                                                    ["norm"] = ore.part.Position,
+                                                    ["pos"] = Vector3.new(
+                                                        math_random(-100, 100) / 100,
+                                                        math_random(0, 100) / 100,
+                                                        math_random(-100, 100) / 100
+                                                    )
+                                                }
+                                            }
+                                            blockRemote:InvokeServer(unpack(args))
+                                        end
+                                    end
+                                end)
+                            end)
+                            minedCount = minedCount + 1
+                            task_wait(0.03) -- Small delay between hits
+                        end
+                    end
+                end
+                
+                if minedCount > 0 then
+                    -- Force a rescan after mining multiple ores
+                    lastOreScan = 0
+                    task_wait(0.05)
+                end
+            else
+                -- Not close enough, tween to the closest ore
                 task_spawn(function()
                     pcall(function()
                         local char2 = lp.Character
                         local hrp2 = char2 and char2:FindFirstChild("HumanoidRootPart")
-
-                        if not hrp2 then return end
-
-                        local targetCFrame = CFrame.new(closestHitPart.Position + Vector3.new(0, 3, 0))
-
-                        local dist2 = (hrp2.Position - targetCFrame.Position).Magnitude
-
-                        local tweenInfo2 = TweenInfo.new(math.max((hrp2.Position - targetCFrame.Position).Magnitude / 30, 0.01), Enum.EasingStyle.Linear)
-
+                        
+                        if not hrp2 or not closestOre.part.Parent then return end
+                        
+                        -- Tween to the ore position + 3 studs up
+                        local targetCFrame = CFrame.new(closestOre.part.Position + Vector3.new(0, 3, 0))
+                        
+                        local tweenInfo2 = TweenInfo.new(
+                            math.max((hrp2.Position - targetCFrame.Position).Magnitude / 35, 0.05),
+                            Enum.EasingStyle.Linear
+                        )
+                        
                         local moveTween = TweenService:Create(hrp2, tweenInfo2, {CFrame = targetCFrame})
-
                         moveTween:Play()
                         moveTween.Completed:Wait()
-
-                        local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
-
-                        if netManaged then
-                            netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
-
-                            local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
-
-                            if blockRemote then
-                                local args = {
-                                    [1] = {
-                                        [getgenv().HitAuraKey] = getgenv().HitAuraValue,
-                                        ["part"] = closestHitPart,
-                                        ["block"] = closestBlock,
-                                        ["norm"] = closestHitPart.Position,
-                                        ["pos"] = Vector3.new(
-                                            math_random(-100, 100) / 100,
-                                            math_random(0, 100) / 100,
-                                            math_random(-100, 100) / 100
-                                        )
+                        
+                        -- After tweening, mine the ore we traveled to
+                        if closestOre.block and closestOre.block.Parent then
+                            local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+                            if netManaged then
+                                netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                                local blockRemote = netManaged:FindFirstChild(BlockHitRemoteName)
+                                
+                                if blockRemote then
+                                    local args = {
+                                        [1] = {
+                                            [getgenv().HitAuraKey] = getgenv().HitAuraValue,
+                                            ["part"] = closestOre.part,
+                                            ["block"] = closestOre.block,
+                                            ["norm"] = closestOre.part.Position,
+                                            ["pos"] = Vector3.new(
+                                                math_random(-100, 100) / 100,
+                                                math_random(0, 100) / 100,
+                                                math_random(-100, 100) / 100
+                                            )
+                                        }
                                     }
-                                }
-
-                                blockRemote:InvokeServer(unpack(args))
+                                    blockRemote:InvokeServer(unpack(args))
+                                end
                             end
                         end
                     end)
                 end)
+                
+                task_wait(0.05)
             end
-
-            task_wait(0.01)
         end
     end)
 end
