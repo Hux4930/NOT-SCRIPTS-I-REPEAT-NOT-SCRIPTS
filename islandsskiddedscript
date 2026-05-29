@@ -725,7 +725,7 @@ function StartOreAura()
             local char = lp.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
 
-            if not hrp then task_wait(1); continue end
+            if not hrp then task_wait(0.01); continue end
 
             if not getgenv().HitAuraKey then
                 SwizUI:Notify("Waiting", "Hit an ore manually once to bypass!")
@@ -733,9 +733,9 @@ function StartOreAura()
             end
 
             local pickaxe = GetEquippedTool()
-            if not pickaxe then task_wait(1); continue end
+            if not pickaxe then task_wait(0.01); continue end
 
-            -- Rescan every cycle (fast, no caching delay)
+            -- Rescan every cycle
             local ores = {}
             local containers = GetFarmContainers()
 
@@ -758,7 +758,7 @@ function StartOreAura()
 
             table_sort(ores, function(a, b) return a.dist < b.dist end)
 
-            if #ores == 0 then task_wait(0.1); continue end
+            if #ores == 0 then task_wait(0.01); continue end
 
             local closest = ores[1]
             if not closest.block.Parent then continue end
@@ -789,13 +789,12 @@ function StartOreAura()
                                             )
                                         })
                                     end)
-                                    task_wait(0.03)
+                                    task_wait(0.01)
                                 end
                             end
                         end
                     end
                 end
-                -- Loop immediately — no extra wait
 
             else
                 -- Tween to closest ore
@@ -807,7 +806,6 @@ function StartOreAura()
                     moveTween:Play()
                     moveTween.Completed:Wait()
                 end
-                -- Loop immediately after tween — rescan and mine
             end
         end
     end)
