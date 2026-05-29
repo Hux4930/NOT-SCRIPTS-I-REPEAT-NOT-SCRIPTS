@@ -775,23 +775,16 @@ function StartOreAura()
             end
 
             -- Tween toward closest ore within 200 studs
-            if tweenTarget and tweenTarget.Parent then
-                if currentTween then
-                    currentTween:Cancel()
-                    currentTween = nil
-                end
-
-                local tweenTime = math.clamp(tweenTargetDist / 20, 0.1, 1.0)
-                currentTween = TweenService:Create(hrp, TweenInfo.new(tweenTime, Enum.EasingStyle.Linear), {
-                    Position = tweenTarget.Position + Vector3.new(0, 3, 0)
-                })
-                currentTween:Play()
-            else
-                if currentTween then
-                    currentTween:Cancel()
-                    currentTween = nil
-                end
-            end
+RunService.RenderStepped:Connect(function(deltaTime)
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if char and hum and hrp and toggleStates.CustomWalkSpeed then
+        hum.WalkSpeed = getgenv().CustomWalkSpeed
+        if hum.MoveDirection.Magnitude > 0 then
+            local extraSpeed = getgenv().CustomWalkSpeed - 16
+            if extraSpeed > 0 then hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (extraSpeed * deltaTime)) end
+        end
+    end
+end)
 
             -- Aura hit scan stays at 18 studs
             local ores = {}
