@@ -718,12 +718,13 @@ task_spawn(function() while true do pcall(function() UpdateESP() end); task_wait
 -- Cache variables outside the function
 local lastOreScan = 0
 local cachedOres = {}
+
 function StartOreAura()
     task.spawn(function()
         local lastScan = 0
         local cachedContainers = {}
-        local RunService = game:GetService("RunService")
-        local tweenConnection = nil
+        local TweenService = game:GetService("TweenService")
+        local currentTween = nil
 
         while toggleStates.OreAura do
             task.wait(0.1)
@@ -740,88 +741,32 @@ function StartOreAura()
             local pickaxe = GetEquippedTool()
             if not pickaxe then continue end
 
+            -- Re-scan containers every 2 seconds
             if os.clock() - lastScan > 2 then
                 cachedContainers = GetFarmContainers()
                 lastScan = os.clock()
             end
 
+            local ores = {}
             local hrpPos = hrp.Position
 
-            -- 200 stud scan for movement target
-            local tweenTarget = nil
-            local tweenTargetDist = math.huge
-
             for i = 1, #cachedContainers do
                 local container = cachedContainers[i]
+
+                -- ✅ Skip destroyed containers
                 if not container or not container.Parent then continue end
+
                 local children = container:GetChildren()
                 for j = 1, #children do
                     local block = children[j]
+
+                    -- ✅ Skip destroyed/mined ores
                     if not block or not block.Parent then continue end
+
                     if IsAuraOreMatch(block) then
                         local part = block:FindFirstChildWhichIsA("BasePart")
-                        if part and part.Parent then
-                            local dist = (hrpPos - part.Position).Magnitude
-                            if dist <= 200 and dist < tweenTargetDist then
-                                tweenTarget = part
-                                tweenTargetDist = dist
-                            end
-                        end
-                    end
-                end
-            end
 
-            -- Disconnect old movement connection
-            if tweenConnection then
-                tweenConnection:Disconnect()
-                tweenConnection = nil
-            end
-
-            -- Move toward target using RenderStepped at 40 studs/s
-            if tweenTarget and tweenTarget.Parent then
-                local targetPart = tweenTarget
-                tweenConnection = RunService.RenderStepped:Connect(function(deltaTime)
-                    local c = lp.Character
-                    local h = c and c:FindFirstChild("HumanoidRootPart")
-                    if not h then
-                        tweenConnection:Disconnect()
-                        tweenConnection = nil
-                        return
-                    end
-
-                    if not targetPart or not targetPart.Parent then
-                        tweenConnection:Disconnect()
-                        tweenConnection = nil
-                        return
-                    end
-
-                    local targetPos = targetPart.Position + Vector3.new(0, 3, 0)
-                    local dist = (h.Position - targetPos).Magnitude
-
-                    if dist <= 8 then
-                        tweenConnection:Disconnect()
-                        tweenConnection = nil
-                        return
-                    end
-
-                    local direction = (targetPos - h.Position).Unit
-                    h.CFrame = h.CFrame + (direction * 40 * deltaTime)
-                end)
-            end
-
-            -- 18 stud aura hit scan
-            local ores = {}
-            hrpPos = hrp.Position
-
-            for i = 1, #cachedContainers do
-                local container = cachedContainers[i]
-                if not container or not container.Parent then continue end
-                local children = container:GetChildren()
-                for j = 1, #children do
-                    local block = children[j]
-                    if not block or not block.Parent then continue end
-                    if IsAuraOreMatch(block) then
-                        local part = block:FindFirstChildWhichIsA("BasePart")
+                        -- ✅ Verify part still exists in workspace
                         if part and part.Parent then
                             local dist = (hrpPos - part.Position).Magnitude
                             if dist <= 18 then
@@ -841,8 +786,32 @@ function StartOreAura()
             end)
 
             if #ores == 0 then
-                task.wait(0.15)
+                -- Stop tweening if nothing nearby
+                if currentTween then
+                    currentTween:Cancel()
+                    currentTween = nil
+                end
                 continue
+            end
+
+            -- ✅ Tween toward the closest ore
+            local closest = ores[1]
+            if closest and closest.part and closest.part.Parent then
+                local targetPos = closest.part.Position
+
+                -- Cancel old tween before starting new one
+                if currentTween then
+                    currentTween:Cancel()
+                    currentTween = nil
+                end
+
+                local dist = (hrp.Position - targetPos).Magnitude
+                local tweenTime = math.clamp(dist / 20, 0.1, 0.5) -- speed scales with distance
+
+                currentTween = TweenService:Create(hrp, TweenInfo.new(tweenTime, Enum.EasingStyle.Linear), {
+                    Position = targetPos + Vector3.new(0, 3, 0) -- slight offset so you don't clip into ore
+                })
+                currentTween:Play()
             end
 
             local batchSize = math.min(4, #ores)
@@ -854,6 +823,8 @@ function StartOreAura()
 
             for i = 1, batchSize do
                 local ore = ores[i]
+
+                -- ✅ Final check before firing — ore may have died during iteration
                 if ore and ore.block and ore.block.Parent and ore.part and ore.part.Parent then
                     pcall(function()
                         blockRemote:InvokeServer({
@@ -874,10 +845,10 @@ function StartOreAura()
             task.wait(0.15)
         end
 
-        -- Cleanup on toggle off
-        if tweenConnection then
-            tweenConnection:Disconnect()
-            tweenConnection = nil
+        -- Clean up tween when aura is toggled off
+        if currentTween then
+            currentTween:Cancel()
+            currentTween = nil
         end
     end)
 end
