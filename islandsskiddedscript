@@ -717,7 +717,6 @@ task_spawn(function() while true do pcall(function() UpdateESP() end); task_wait
 
 -- Cache variables outside the function
 local lastOreScan = 0
-local oreCache = {}
 
 function StartOreAura()
     task_spawn(function()
@@ -743,39 +742,36 @@ function StartOreAura()
                 continue
             end
 
-            -- Only scan for ores every 0.5 seconds instead of every loop
-            local now = tick()
-            if now - lastOreScan >= 0.5 then
-                lastOreScan = now
-                oreCache = {} -- Clear and rebuild cache
-                
-                local containers = GetFarmContainers()
-                for _, container in ipairs(containers) do
-                    local children = container:GetChildren()
-                    for i = 1, #children do
-                        local block = children[i]
-                        if IsAuraOreMatch(block) then
-                            local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
-                            if hitPart and hitPart:IsA("BasePart") then
-                                table_insert(oreCache, {block = block, part = hitPart})
-                            end
-                        end
-                    end
-                end
-            end
-
-            -- Find closest from cache
             local closestBlock = nil
             local closestHitPart = nil
             local closestDist = 400
 
-            for _, data in ipairs(oreCache) do
-                if data.block and data.block.Parent and data.part and data.part.Parent then
-                    local dist = (hrp.Position - data.part.Position).Magnitude
-                    if dist <= closestDist then
-                        closestDist = dist
-                        closestBlock = data.block
-                        closestHitPart = data.part
+            -- Only do the full container scan every 0.5 seconds
+            local now = tick()
+            if now - lastOreScan >= 0.5 then
+                lastOreScan = now
+                
+                local containers = GetFarmContainers()
+
+                for _, container in ipairs(containers) do
+                    local children = container:GetChildren()
+
+                    for i = 1, #children do
+                        local block = children[i]
+
+                        if IsAuraOreMatch(block) then
+                            local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
+
+                            if hitPart and hitPart:IsA("BasePart") then
+                                local dist = (hrp.Position - hitPart.Position).Magnitude
+
+                                if dist <= closestDist then
+                                    closestDist = dist
+                                    closestBlock = block
+                                    closestHitPart = hitPart
+                                end
+                            end
+                        end
                     end
                 end
             end
