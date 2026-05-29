@@ -1192,7 +1192,7 @@ local function StartKillAura()
                                     end)
                                 end)
                                 hitCount = hitCount + 1
-                                task_wait(0.35)
+                                task_wait(0.01)
                             end
 
                             -- Mob dead — restore
