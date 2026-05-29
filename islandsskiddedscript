@@ -738,6 +738,7 @@ function StartOreAura()
             -- Rescan every cycle
             local ores = {}
             local containers = GetFarmContainers()
+            local hrpPos = hrp.Position -- cache position once
 
             for _, container in ipairs(containers) do
                 local children = container:GetChildren()
@@ -746,67 +747,87 @@ function StartOreAura()
                     if IsAuraOreMatch(block) then
                         local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
                         if hitPart and hitPart:IsA("BasePart") then
-                            table_insert(ores, {
-                                block = block,
-                                part = hitPart,
-                                dist = (hrp.Position - hitPart.Position).Magnitude
-                            })
+                            local dist = (hrpPos - hitPart.Position).Magnitude
+                            if dist <= 15 then -- only collect in-range ores upfront
+                                table_insert(ores, {
+                                    block = block,
+                                    part = hitPart,
+                                    dist = dist
+                                })
+                            end
                         end
                     end
                 end
             end
 
-            table_sort(ores, function(a, b) return a.dist < b.dist end)
-
-            if #ores == 0 then task_wait(0.01); continue end
-
-            local closest = ores[1]
-            if not closest.block.Parent then continue end
-
-            local closestDist = (hrp.Position - closest.part.Position).Magnitude
-
-            if closestDist <= 15 then
-                -- Mine all ores within 15 studs
-                local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
-                if netManaged then
-                    netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
-                    local blockRemote = netManaged and netManaged:FindFirstChild(BlockHitRemoteName)
-
-                    if blockRemote then
-                        for _, ore in ipairs(ores) do
-                            if ore.block and ore.block.Parent and ore.part and ore.part.Parent then
-                                if (hrp.Position - ore.part.Position).Magnitude <= 15 then
-                                    pcall(function()
-                                        blockRemote:InvokeServer({
-                                            [getgenv().HitAuraKey] = getgenv().HitAuraValue,
-                                            ["part"]  = ore.part,
-                                            ["block"] = ore.block,
-                                            ["norm"]  = ore.part.Position,
-                                            ["pos"]   = Vector3.new(
-                                                math_random(-100, 100) / 100,
-                                                math_random(0,   100) / 100,
-                                                math_random(-100, 100) / 100
-                                            )
-                                        })
-                                    end)
-                                    task_wait(0.01)
+            if #ores == 0 then
+                -- Nothing in range, tween to nearest ore (rescan without distance filter)
+                local nearest, nearestDist = nil, math.huge
+                for _, container in ipairs(containers) do
+                    for _, block in ipairs(container:GetChildren()) do
+                        if IsAuraOreMatch(block) then
+                            local hitPart = block:FindFirstChild("1") or block:FindFirstChildWhichIsA("BasePart")
+                            if hitPart and hitPart:IsA("BasePart") then
+                                local d = (hrpPos - hitPart.Position).Magnitude
+                                if d < nearestDist then
+                                    nearestDist = d
+                                    nearest = hitPart
                                 end
                             end
                         end
                     end
                 end
+                if nearest then
+                    local hrp2 = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp2 and nearest.Parent then
+                        local targetCFrame = CFrame.new(nearest.Position + Vector3.new(0, 3, 0))
+                        local duration = math.max((hrp2.Position - targetCFrame.Position).Magnitude / 35, 0.05)
+                        local tween = TweenService:Create(hrp2, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
+                        tween:Play()
+                        tween.Completed:Wait()
+                    end
+                end
+                continue
+            end
 
-            else
-                -- Tween to closest ore
-                local hrp2 = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-                if hrp2 and closest.part.Parent then
-                    local targetCFrame = CFrame.new(closest.part.Position + Vector3.new(0, 3, 0))
-                    local duration = math.max((hrp2.Position - targetCFrame.Position).Magnitude / 35, 0.05)
-                    local moveTween = TweenService:Create(hrp2, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-                    moveTween:Play()
-                    moveTween.Completed:Wait()
+            -- Sort and take up to 9 closest
+            table_sort(ores, function(a, b) return a.dist < b.dist end)
+            local batch = {}
+            for i = 1, math.min(9, #ores) do
+                batch[i] = ores[i]
+            end
+
+            -- Fire all 9 in parallel
+            local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
+            if netManaged then
+                netManaged = netManaged.node_modules:FindFirstChild("@rbxts").net.out._NetManaged
+                local blockRemote = netManaged and netManaged:FindFirstChild(BlockHitRemoteName)
+
+                if blockRemote then
+                    local threads = {}
+                    for _, ore in ipairs(batch) do
+                        if ore.block and ore.block.Parent and ore.part and ore.part.Parent then
+                            threads[#threads + 1] = task_spawn(function()
+                                pcall(function()
+                                    blockRemote:InvokeServer({
+                                        [getgenv().HitAuraKey] = getgenv().HitAuraValue,
+                                        ["part"]  = ore.part,
+                                        ["block"] = ore.block,
+                                        ["norm"]  = ore.part.Position,
+                                        ["pos"]   = Vector3.new(
+                                            math_random(-100, 100) / 100,
+                                            math_random(0,   100) / 100,
+                                            math_random(-100, 100) / 100
+                                        )
+                                    })
+                                end)
+                            end)
+                        end
+                    end
                 end
             end
+
+            task_wait(0.05) -- small cooldown between batches
         end
     end)
 end
