@@ -777,9 +777,9 @@ function StartOreAura()
                 tweenConnection = nil
             end
 
-            -- Move toward target using RenderStepped (same method as your walkspeed)
+            -- Move toward target using RenderStepped at 40 studs/s
             if tweenTarget and tweenTarget.Parent then
-                local targetPart = tweenTarget -- capture reference
+                local targetPart = tweenTarget
                 tweenConnection = RunService.RenderStepped:Connect(function(deltaTime)
                     local c = lp.Character
                     local h = c and c:FindFirstChild("HumanoidRootPart")
@@ -789,7 +789,6 @@ function StartOreAura()
                         return
                     end
 
-                    -- Stop if ore is gone
                     if not targetPart or not targetPart.Parent then
                         tweenConnection:Disconnect()
                         tweenConnection = nil
@@ -799,16 +798,14 @@ function StartOreAura()
                     local targetPos = targetPart.Position + Vector3.new(0, 3, 0)
                     local dist = (h.Position - targetPos).Magnitude
 
-                    -- Stop moving once within aura range
                     if dist <= 8 then
                         tweenConnection:Disconnect()
                         tweenConnection = nil
                         return
                     end
 
-                    local speed = getgenv().CustomWalkSpeed or 16
                     local direction = (targetPos - h.Position).Unit
-                    h.CFrame = h.CFrame + (direction * speed * deltaTime)
+                    h.CFrame = h.CFrame + (direction * 40 * deltaTime)
                 end)
             end
 
