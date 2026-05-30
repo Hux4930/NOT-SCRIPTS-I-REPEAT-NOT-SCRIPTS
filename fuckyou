@@ -1102,16 +1102,37 @@ StorageSection:AddButton({
 	Description = "",
 	Callback = function()
 		local clipboardText = getClipboardText()
+
 		if not clipboardText or clipboardText == "" then
 			notify("Import", "Clipboard is empty or unsupported.", 4)
 			return
 		end
 
-		local ok, result = loadSchematicText(clipboardText)
-		if ok then
-			notify("Import", string.format("Loaded %d preview blocks from clipboard.", result), 4)
+		local function loadContent(content)
+			local ok, result = loadSchematicText(content)
+
+			if ok then
+				notify("Import", string.format("Loaded %d preview blocks.", result), 4)
+			else
+				notify("Import", tostring(result), 5)
+			end
+		end
+
+		if clipboardText:match("^https://raw%.githubusercontent%.com/")
+			or clipboardText:match("^https://github%.com/.+/raw/")
+		then
+			local success, response = pcall(function()
+				return game:HttpGet(clipboardText)
+			end)
+
+			if not success then
+				notify("Import", "Failed to download GitHub file.", 5)
+				return
+			end
+
+			loadContent(response)
 		else
-			notify("Import", tostring(result), 5)
+			loadContent(clipboardText)
 		end
 	end
 })
