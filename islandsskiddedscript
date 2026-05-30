@@ -1382,7 +1382,7 @@ local SecEspList = TabOres:AddSection("Select Ores (ESP) [150m]", true)
 SecOres:AddToggle("Enable Ore Aura", false, function(state) toggleStates.OreAura = state; getgenv().OreAuraEnabled = state; if state then StartOreAura() end end)
 SecOres:AddToggle("Enable Ore ESP (Text)", false, function(state) getgenv().OreEspTextEnabled = state end)
 SecOres:AddToggle("Enable ESP Highlights", false, function(state) getgenv().OreEspHighlightEnabled = state end)
-SecOres:AddSlider("Aura Radius (Blocks)", 1, 20, 12, function(val) getgenv().OreAuraRadius = math_floor(val + 0.5) end)
+SecOres:AddSlider("Aura Radius (Blocks)", 1, 200, 12, function(val) getgenv().OreAuraRadius = math_floor(val + 0.5) end)
 local oreList = { ["All Rocks"] = "all", ["Stone"] = "stone", ["Coal"] = "coal", ["Iron"] = "iron", ["Gold"] = "gold", ["Diamond"] = "diamond", ["Amethyst"] = "amethyst", ["Obsidian"] = "obsidian", ["Copper"] = "copper", ["Electrite"] = "electrite" }
 for dispName, internalName in pairs(oreList) do SecAuraList:AddToggle(dispName, false, function(state) getgenv().SelectedOres[internalName] = state end); SecEspList:AddToggle(dispName, false, function(state) getgenv().EspSelectedOres[internalName] = state end) end
 
