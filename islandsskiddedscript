@@ -1144,7 +1144,6 @@ local function StartKillAura()
     getgenv()._NotifiedKillAura = false
 
     task_spawn(function()
-        local center = cam.ViewportSize / 2
         while toggleStates.KillAura do
             local char = lp.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1207,15 +1206,24 @@ local function StartKillAura()
                         local mobHrp = mob.HumanoidRootPart
                         local dist = (hrp.Position - mobHrp.Position).Magnitude
 
-                        if dist <= (getgenv().KillAuraRadius or 30) and mobHrp.Parent then
+                        -- Max fetch distance: 200 studs (configurable via getgenv().KillAuraFetchDistance)
+                        local fetchDistance = getgenv().KillAuraFetchDistance or 200
+
+                        if dist <= fetchDistance and mobHrp.Parent then
 
                             local humanoid = char:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid.PlatformStand = true end
                             hrp.Anchored = true
 
-                            local duration = 0.15
+                            -- Tween at 20 studs per second
+                            local TWEEN_SPEED = 20
                             local elapsed = 0
                             local startCFrame = hrp.CFrame
+
+                            local bottomY = GetModelBottomY(mob)
+                            local targetPos = Vector3.new(mobHrp.Position.X, bottomY - 5, mobHrp.Position.Z)
+                            local totalDist = (hrp.Position - targetPos).Magnitude
+                            local duration = math.max(totalDist / TWEEN_SPEED, 0.05)
 
                             local lerpConn
                             lerpConn = game:GetService("RunService").Heartbeat:Connect(function(dt)
@@ -1223,39 +1231,36 @@ local function StartKillAura()
                                 local alpha = math.clamp(elapsed / duration, 0, 1)
                                 local t = alpha * alpha * (3 - 2 * alpha)
                                 if mobHrp and mobHrp.Parent then
-                                    local bottomY = GetModelBottomY(mob)
-                                    local targetPos = Vector3.new(mobHrp.Position.X, bottomY - 5, mobHrp.Position.Z)
-                                    local targetCFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
-                                    hrp.CFrame = startCFrame:Lerp(targetCFrame, t)
+                                    local bY = GetModelBottomY(mob)
+                                    local tPos = Vector3.new(mobHrp.Position.X, bY - 5, mobHrp.Position.Z)
+                                    hrp.CFrame = startCFrame:Lerp(CFrame.new(tPos, tPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1))), t)
                                 end
                             end)
 
                             repeat task_wait() until elapsed >= duration
                             lerpConn:Disconnect()
 
+                            -- Snap to final position
                             if mobHrp and mobHrp.Parent then
-                                local bottomY = GetModelBottomY(mob)
-                                local targetPos = Vector3.new(mobHrp.Position.X, bottomY - 5, mobHrp.Position.Z)
-                                hrp.CFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
+                                local bY = GetModelBottomY(mob)
+                                local tPos = Vector3.new(mobHrp.Position.X, bY - 5, mobHrp.Position.Z)
+                                hrp.CFrame = CFrame.new(tPos, tPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
                             end
 
+                            -- Lock position to mob while hitting
                             local posLockConn
                             posLockConn = game:GetService("RunService").Heartbeat:Connect(function()
                                 if hrp and hrp.Parent and mobHrp and mobHrp.Parent then
-                                    local bottomY = GetModelBottomY(mob)
-                                    local targetPos = Vector3.new(mobHrp.Position.X, bottomY - 5, mobHrp.Position.Z)
-                                    hrp.CFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
+                                    local bY = GetModelBottomY(mob)
+                                    local tPos = Vector3.new(mobHrp.Position.X, bY - 5, mobHrp.Position.Z)
+                                    hrp.CFrame = CFrame.new(tPos, tPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
                                 end
                             end)
 
                             local singleHitPacket = { { [getgenv().MobHitKey] = getgenv().MobHitValue, ["hitUnit"] = mob } }
 
+                            -- Hit loop: fires remote directly, no mouse movement
                             while toggleStates.KillAura and mob and mob.Parent and mob:FindFirstChild("HumanoidRootPart") do
-                                pcall(function()
-                                    VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
-                                    task_wait(0.01)
-                                    VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
-                                end)
                                 task_spawn(function()
                                     pcall(function()
                                         local netManaged = ReplicatedStorage:FindFirstChild("rbxts_include")
