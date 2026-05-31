@@ -1129,6 +1129,10 @@ local function StartSpiritFarm()
 end
 
 local function StartKillAura()
+    -- Reset notification flags each time KillAura starts
+    getgenv()._NotifiedTool = false
+    getgenv()._NotifiedKillAura = false
+
     task_spawn(function()
         local center = cam.ViewportSize / 2
         while toggleStates.KillAura do
