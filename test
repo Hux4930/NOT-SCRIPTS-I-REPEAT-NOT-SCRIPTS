@@ -2,29 +2,30 @@ repeat
 	task.wait()
 until game:IsLoaded()
 game:GetService("UserInputService").JumpRequest:connect(function()
-     game:GetService"Players".LocalPlayer.Character:FindFirstChildOfClass'Humanoid':ChangeState("Jumping")       
+	game:GetService"Players".LocalPlayer.Character:FindFirstChildOfClass'Humanoid':ChangeState("Jumping")
 end)
-local Players = game:GetService("Players")
+local Players          = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
+local Workspace        = game:GetService("Workspace")
+local HttpService      = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
-local StarterGui = game:GetService("StarterGui")
+local StarterGui       = game:GetService("StarterGui")
 
 local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
+local Mouse       = LocalPlayer:GetMouse()
 
-local BLOCK_SIZE = 3
-local SCRIPT_FOLDER = "IslandsSchematicOnly"
-local GAME_FOLDER = SCRIPT_FOLDER .. "/Islands"
-local SCHEMATIC_FOLDER = GAME_FOLDER .. "/Schematics"
-local CACHE_FOLDER = GAME_FOLDER .. "/Cache"
-local PLACE_CACHE_FILE = CACHE_FOLDER .. "/block_place_cache.json"
-local REMOTE_DEBUG_FOLDER = "_ISLANDS_SCHEMATIC_ONLY"
-local PREVIEW_MODEL_NAME = "IslandsSchematicOnlyPreview"
-local SELECTION_PART_NAME = "IslandsSchematicOnlySelection"
-local START_MARKER_NAME = "IslandsSchematicOnlyStart"
-local END_MARKER_NAME = "IslandsSchematicOnlyEnd"
+local BLOCK_SIZE            = 3
+local SCRIPT_FOLDER         = "IslandsSchematicOnly"
+local GAME_FOLDER           = SCRIPT_FOLDER .. "/Islands"
+local SCHEMATIC_FOLDER      = GAME_FOLDER .. "/Schematics"
+local CACHE_FOLDER          = GAME_FOLDER .. "/Cache"
+local PLACE_CACHE_FILE      = CACHE_FOLDER .. "/block_place_cache.json"
+local TOTEM_STORAGE_FILE    = GAME_FOLDER .. "/totem_storage.json"   -- persistent totem save file
+local REMOTE_DEBUG_FOLDER   = "_ISLANDS_SCHEMATIC_ONLY"
+local PREVIEW_MODEL_NAME    = "IslandsSchematicOnlyPreview"
+local SELECTION_PART_NAME   = "IslandsSchematicOnlySelection"
+local START_MARKER_NAME     = "IslandsSchematicOnlyStart"
+local END_MARKER_NAME       = "IslandsSchematicOnlyEnd"
 
 -- Totem upgrade types
 local TOTEM_UPGRADE_TYPES = { "efficiency", "quality", "utility" }
@@ -45,18 +46,18 @@ ensureFolder(CACHE_FOLDER)
 local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/IJHGIAJGIHJASUIJGHIUHIUHSUIAOHJAHOIBNAO/Nekohub/main/Fluent-master/main.lua"))()
 
 local Window = Fluent:CreateWindow({
-	Title = "Islands Schematic Only",
-	SubTitle = "copy, save, load, move, duplicate, paste, totems",
+	Title    = "Islands Schematic Only",
+	SubTitle = "copy, save, load, move, rotate, duplicate, paste, totems",
 	TabWidth = 160,
-	Size = UDim2.fromOffset(620, 620),
-	Acrylic = true,
-	Theme = "Dark",
+	Size     = UDim2.fromOffset(620, 660),
+	Acrylic  = true,
+	Theme    = "Dark",
 	MinimizeKey = Enum.KeyCode.RightControl
 })
 
 local Tabs = {
-	Main = Window:AddTab({ Title = "Schematic", Icon = "printer" }),
-	Totems = Window:AddTab({ Title = "Totems", Icon = "zap" })
+	Main   = Window:AddTab({ Title = "Schematic", Icon = "printer" }),
+	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" })
 }
 
 local Options = Fluent.Options
@@ -64,21 +65,11 @@ local Options = Fluent.Options
 local function notify(title, text, duration)
 	duration = duration or 4
 	pcall(function()
-		Fluent:Notify({
-			Title = title,
-			Content = text,
-			Duration = duration
-		})
+		Fluent:Notify({ Title = title, Content = text, Duration = duration })
 	end)
-
 	pcall(function()
-		StarterGui:SetCore("SendNotification", {
-			Title = title,
-			Text = text,
-			Duration = duration
-		})
+		StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = duration })
 	end)
-
 	print(string.format("[%s] %s", tostring(title), tostring(text)))
 end
 
@@ -88,51 +79,37 @@ end
 
 local function ensureJsonExtension(name)
 	name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
-	if name == "" then
-		name = "Template"
-	end
-	if not name:lower():match("%.json$") then
-		name = name .. ".json"
-	end
+	if name == "" then name = "Template" end
+	if not name:lower():match("%.json$") then name = name .. ".json" end
 	return name
 end
 
 local function getClipboardText()
-	if type(getclipboard) == "function" then
-		return getclipboard()
-	end
-	if type(readclipboard) == "function" then
-		return readclipboard()
-	end
+	if type(getclipboard)  == "function" then return getclipboard()  end
+	if type(readclipboard) == "function" then return readclipboard() end
 	return nil
 end
 
 local function copyToClipboard(text)
-	if type(setclipboard) == "function" then
-		setclipboard(text)
-		return true
-	end
+	if type(setclipboard) == "function" then setclipboard(text); return true end
 	return false
 end
 
 local function getRemoteDebugFolder()
 	local folder = game:FindFirstChild(REMOTE_DEBUG_FOLDER)
-	if folder then
-		return folder
-	end
-
+	if folder then return folder end
 	folder = Instance.new("Folder")
-	folder.Name = REMOTE_DEBUG_FOLDER
+	folder.Name   = REMOTE_DEBUG_FOLDER
 	folder.Parent = game
 	return folder
 end
 
 local function setRemoteDebugValue(name, value)
 	local folder = getRemoteDebugFolder()
-	local entry = folder:FindFirstChild(name)
+	local entry  = folder:FindFirstChild(name)
 	if not entry then
-		entry = Instance.new("StringValue")
-		entry.Name = name
+		entry        = Instance.new("StringValue")
+		entry.Name   = name
 		entry.Parent = folder
 	end
 	entry.Value = tostring(value or "")
@@ -148,53 +125,51 @@ local function getNetManaged()
 			:WaitForChild("out")
 			:WaitForChild("_NetManaged")
 	end)
-
-	if ok then
-		return result
-	end
-
-	return nil
+	return ok and result or nil
 end
 
 local cloneFolder = Workspace:FindFirstChild(PREVIEW_MODEL_NAME)
 if not cloneFolder then
-	cloneFolder = Instance.new("Model")
-	cloneFolder.Name = PREVIEW_MODEL_NAME
+	cloneFolder        = Instance.new("Model")
+	cloneFolder.Name   = PREVIEW_MODEL_NAME
 	cloneFolder.Parent = Workspace
 end
 
 local blocksFolder = ReplicatedStorage:WaitForChild("Blocks")
-local netManaged = getNetManaged()
+local netManaged   = getNetManaged()
 
-local currentFileName = "Template.json"
-local importCodeValue = ""
-local lastSavedJson = nil
-local buildCollision = true
-local moveStepBlocks = 1
-local duplicateCount = 1
-local duplicateOffsetX = 0
-local duplicateOffsetY = 0
-local duplicateOffsetZ = 0
-local pasteInProgress = false
+local currentFileName      = "Template.json"
+local importCodeValue      = ""
+local lastSavedJson        = nil
+local buildCollision       = true
+local moveStepBlocks       = 1
+local duplicateCount       = 1
+local duplicateOffsetX     = 0
+local duplicateOffsetY     = 0
+local duplicateOffsetZ     = 0
+local pasteInProgress      = false
+
+-- Rotation state (degrees, Y-axis; stored as multiples of 90)
+local previewRotationDeg   = 0   -- 0 / 90 / 180 / 270
 
 -- Totem state
 local totemUpgradeInProgress = false
-local totemUpgradeTarget = "totem_rock"  -- default upgrade target type
-local totemUpgradeDelay = 0.3            -- seconds between upgrade calls
+local totemUpgradeTarget     = "totem_rock"
+local totemUpgradeDelay      = 0.3
 
-local placementHashName = nil
-local placementHashValue = nil
-local placementCaptureInstalled = false
+local placementHashName           = nil
+local placementHashValue          = nil
+local placementCaptureInstalled   = false
 
-local selectionStartPos = nil
-local selectionEndPos = nil
-local selectionMoveStep = 1
-local selectionPart = nil
-local startMarker = nil
-local endMarker = nil
+local selectionStartPos   = nil
+local selectionEndPos     = nil
+local selectionMoveStep   = 1
+local selectionPart       = nil
+local startMarker         = nil
+local endMarker           = nil
 local selectionStartBlock = nil
-local selectionEndBlock = nil
-local selectionPickMode = nil
+local selectionEndBlock   = nil
+local selectionPickMode   = nil
 
 -- ─── Sections ─────────────────────────────────────────────────────────────────
 
@@ -202,6 +177,7 @@ local RemoteSection    = Tabs.Main:AddSection("Remote")
 local SelectionSection = Tabs.Main:AddSection("Selection")
 local StorageSection   = Tabs.Main:AddSection("Storage")
 local PreviewSection   = Tabs.Main:AddSection("Preview")
+local RotateSection    = Tabs.Main:AddSection("Rotate & Flip")   -- NEW
 local BlocksSection    = Tabs.Main:AddSection("Blocks In Build")
 local PasteSection     = Tabs.Main:AddSection("Paste")
 
@@ -212,54 +188,48 @@ local TotemUpgradeSection = Tabs.Totems:AddSection("Totem Auto-Upgrader")
 -- ─── Status Paragraphs ────────────────────────────────────────────────────────
 
 local RemoteStatus = RemoteSection:AddParagraph({
-	Title = "Placement Remote",
-	Content = "not resolved yet"
+	Title = "Placement Remote", Content = "not resolved yet"
 })
 
 local SelectionStatus = SelectionSection:AddParagraph({
-	Title = "Selection",
-	Content = "pick a start and end block, or use step buttons"
+	Title = "Selection", Content = "pick a start and end block, or use step buttons"
 })
 
 local PreviewStatus = PreviewSection:AddParagraph({
-	Title = "Preview",
-	Content = "0 preview blocks"
+	Title = "Preview", Content = "0 preview blocks"
+})
+
+local RotateStatus = RotateSection:AddParagraph({
+	Title = "Rotation", Content = "0° (no rotation)"
 })
 
 local BlocksStatus = BlocksSection:AddParagraph({
-	Title = "Block Types",
-	Content = "no preview loaded"
+	Title = "Block Types", Content = "no preview loaded"
 })
 
 local TotemScanStatus = TotemScanSection:AddParagraph({
-	Title = "Scanned Totems",
-	Content = "scan your island to see totem data"
+	Title = "Scanned Totems", Content = "scan your island to see totem data"
+})
+
+local TotemStorageStatus = TotemStorageSection:AddParagraph({
+	Title = "Saved Totems", Content = "no data loaded yet"
 })
 
 local TotemUpgradeStatus = TotemUpgradeSection:AddParagraph({
-	Title = "Upgrade Status",
-	Content = "idle"
+	Title = "Upgrade Status", Content = "idle"
 })
 
--- ─── Helper: island detection ──────────────────────────────────────────────────
+-- ─── Helper: island detection ─────────────────────────────────────────────────
 
 local function getLocalIsland()
 	local islandsFolder = Workspace:FindFirstChild("Islands")
 	if not islandsFolder then return nil end
-
 	local userId = tostring(LocalPlayer.UserId)
 	for _, island in ipairs(islandsFolder:GetChildren()) do
-		if island.Name:find(userId) then
-			return island
-		end
+		if island.Name:find(userId) then return island end
 	end
-
-	-- fallback: return first island if only one exists (solo testing)
 	local children = islandsFolder:GetChildren()
-	if #children == 1 then
-		return children[1]
-	end
-
+	if #children == 1 then return children[1] end
 	return nil
 end
 
@@ -267,36 +237,25 @@ local function isTotemBlock(blockPart)
 	if not blockPart then return false end
 	local name = blockPart.Name:lower()
 	for _, pattern in ipairs(TOTEM_NAME_PATTERNS) do
-		if name:find(pattern) then
-			return true
-		end
+		if name:find(pattern) then return true end
 	end
 	return false
 end
 
 -- ─── Totem scanning ───────────────────────────────────────────────────────────
 
---[[
-	Returns a list of totem entries from the local island's Blocks folder.
-	Each entry: { instance = BasePart, name = string, upgrades = { efficiency=n, quality=n, utility=n } }
-]]
 local function scanTotems()
 	local island = getLocalIsland()
-	if not island then
-		return nil, "Could not find your island in Workspace.Islands."
-	end
+	if not island then return nil, "Could not find your island in Workspace.Islands." end
 
 	local blocksContainer = island:FindFirstChild("Blocks")
-	if not blocksContainer then
-		return nil, "Island has no Blocks folder."
-	end
+	if not blocksContainer then return nil, "Island has no Blocks folder." end
 
 	local totems = {}
 	for _, block in ipairs(blocksContainer:GetChildren()) do
 		if isTotemBlock(block) then
 			local upgradeProgress = block:FindFirstChild("UpgradeProgress")
 			local upgrades = {}
-
 			if upgradeProgress then
 				for _, upgradeType in ipairs(TOTEM_UPGRADE_TYPES) do
 					local val = upgradeProgress:FindFirstChild(upgradeType)
@@ -307,12 +266,7 @@ local function scanTotems()
 					upgrades[upgradeType] = 0
 				end
 			end
-
-			table.insert(totems, {
-				instance = block,
-				name = block.Name,
-				upgrades = upgrades
-			})
+			table.insert(totems, { instance = block, name = block.Name, upgrades = upgrades })
 		end
 	end
 
@@ -320,10 +274,7 @@ local function scanTotems()
 end
 
 local function formatTotemScanStatus(totems)
-	if not totems or #totems == 0 then
-		return "No totem blocks found on your island."
-	end
-
+	if not totems or #totems == 0 then return "No totem blocks found on your island." end
 	local lines = { string.format("Found %d totem(s):", #totems), "" }
 	for _, t in ipairs(totems) do
 		table.insert(lines, "» " .. t.name)
@@ -332,101 +283,139 @@ local function formatTotemScanStatus(totems)
 		end
 		table.insert(lines, "")
 	end
-
 	return table.concat(lines, "\n")
 end
 
--- ─── Totem save/load ─────────────────────────────────────────────────────────
-
+-- ─── Totem persistent save/load (file-based, survives session) ───────────────
 --[[
-	Saves totem data (name + upgrade levels) from the island into the
-	schematic JSON file alongside block data. Keys off "TotemData" in JSON.
+	All totem saves are stored in a single JSON file at TOTEM_STORAGE_FILE.
+	Structure:  { [slotName] = { savedAt = timestamp, totems = [ {name, upgrades}, ... ] } }
+
+	This mirrors the spirit of the persistent storage API the user asked for —
+	every save slot is keyed by a user-chosen name so nothing overwrites another.
 ]]
+
+local function readTotemStore()
+	if not isfile(TOTEM_STORAGE_FILE) then return {} end
+	local ok, decoded = pcall(function()
+		return HttpService:JSONDecode(readfile(TOTEM_STORAGE_FILE))
+	end)
+	if ok and type(decoded) == "table" then return decoded end
+	return {}
+end
+
+local function writeTotemStore(store)
+	writefile(TOTEM_STORAGE_FILE, HttpService:JSONEncode(store))
+end
+
+local function listTotemSlots()
+	local store = readTotemStore()
+	local slots = {}
+	for k in pairs(store) do table.insert(slots, k) end
+	table.sort(slots)
+	return slots
+end
+
+local totemSaveSlotName = "default"
+
+local function saveTotemSlot(slotName)
+	slotName = tostring(slotName or "default"):gsub("^%s+", ""):gsub("%s+$", "")
+	if slotName == "" then slotName = "default" end
+
+	local totems, err = scanTotems()
+	if not totems then return false, err end
+	if #totems == 0 then return false, "No totem blocks found on your island." end
+
+	local store = readTotemStore()
+	local totemData = {}
+	for _, t in ipairs(totems) do
+		table.insert(totemData, { name = t.name, upgrades = t.upgrades })
+	end
+
+	store[slotName] = {
+		savedAt = os.time(),
+		totems  = totemData
+	}
+	writeTotemStore(store)
+	return true, #totems
+end
+
+local function loadTotemSlot(slotName)
+	slotName = tostring(slotName or "default"):gsub("^%s+", ""):gsub("%s+$", "")
+	local store = readTotemStore()
+	local entry = store[slotName]
+	if not entry then
+		return nil, "Slot '" .. slotName .. "' not found. Save it first."
+	end
+	return entry.totems, entry.savedAt
+end
+
+local function deleteTotemSlot(slotName)
+	local store = readTotemStore()
+	if not store[slotName] then return false, "Slot not found." end
+	store[slotName] = nil
+	writeTotemStore(store)
+	return true
+end
+
+local function formatTotemSlotList()
+	local slots = listTotemSlots()
+	if #slots == 0 then return "No saved totem slots yet." end
+	local store = readTotemStore()
+	local lines = { string.format("%d slot(s):", #slots) }
+	for _, slotName in ipairs(slots) do
+		local entry = store[slotName]
+		local count = entry and entry.totems and #entry.totems or 0
+		local saved = entry and entry.savedAt or 0
+		table.insert(lines, string.format("» %s  (%d totem(s), saved %s)", slotName, count, os.date("%H:%M:%S", saved)))
+	end
+	return table.concat(lines, "\n")
+end
+
+-- Also keep the old schematic-file totem embed (backwards compatible)
 local function saveTotemDataToFile(fileName)
 	local totems, err = scanTotems()
-	if not totems then
-		return false, err
-	end
+	if not totems then return false, err end
+	if #totems == 0 then return false, "No totem blocks found to save." end
 
-	if #totems == 0 then
-		return false, "No totem blocks found to save."
-	end
-
-	local path = SCHEMATIC_FOLDER .. "/" .. ensureJsonExtension(fileName)
+	local path    = SCHEMATIC_FOLDER .. "/" .. ensureJsonExtension(fileName)
 	local existing = {}
-
 	if isfile(path) then
-		local ok, decoded = pcall(function()
-			return HttpService:JSONDecode(readfile(path))
-		end)
-		if ok and type(decoded) == "table" then
-			existing = decoded
-		end
+		local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
+		if ok and type(decoded) == "table" then existing = decoded end
 	end
 
 	local totemData = {}
 	for _, t in ipairs(totems) do
-		table.insert(totemData, {
-			name = t.name,
-			upgrades = t.upgrades
-		})
+		table.insert(totemData, { name = t.name, upgrades = t.upgrades })
 	end
-
 	existing.TotemData = totemData
-	local encoded = HttpService:JSONEncode(existing)
-	writefile(path, encoded)
-
+	writefile(path, HttpService:JSONEncode(existing))
 	return true, #totems
 end
 
 local function loadTotemDataFromFile(fileName)
 	local path = SCHEMATIC_FOLDER .. "/" .. ensureJsonExtension(fileName)
-	if not isfile(path) then
-		return nil, "File not found: " .. fileName
-	end
+	if not isfile(path) then return nil, "File not found: " .. fileName end
 
-	local ok, decoded = pcall(function()
-		return HttpService:JSONDecode(readfile(path))
-	end)
-
-	if not ok or type(decoded) ~= "table" then
-		return nil, "Could not parse schematic file."
-	end
-
-	if not decoded.TotemData or #decoded.TotemData == 0 then
-		return nil, "No TotemData found in this schematic."
-	end
-
+	local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
+	if not ok or type(decoded) ~= "table" then return nil, "Could not parse schematic file." end
+	if not decoded.TotemData or #decoded.TotemData == 0 then return nil, "No TotemData in this schematic." end
 	return decoded.TotemData, nil
 end
 
 -- ─── Totem upgrader ───────────────────────────────────────────────────────────
 
---[[
-	Fires UpgradeBlock for each upgrade type on each totem block.
-	Uses live island references so positions stay accurate.
-
-	targetTypeName: the upgrade-tier string e.g. "totem_rock"
-	upgradeTypes: table of upgrade stat names e.g. {"efficiency","quality","utility"}
-	maxLevel: stop calling once a totem's upgrade reaches this level (0 = unlimited)
-]]
 local function autoUpgradeTotems(targetTypeName, upgradeTypes, maxLevel)
-	if totemUpgradeInProgress then
-		notify("Totems", "An upgrade loop is already running.", 3)
-		return
-	end
+	if totemUpgradeInProgress then notify("Totems", "An upgrade loop is already running.", 3); return end
 
 	local upgradeRemote = netManaged and netManaged:FindFirstChild("UpgradeBlock")
-	if not upgradeRemote then
-		notify("Totems", "UpgradeBlock remote not found in _NetManaged.", 5)
-		return
-	end
+	if not upgradeRemote then notify("Totems", "UpgradeBlock remote not found.", 5); return end
 
 	totemUpgradeInProgress = true
 
 	task.spawn(function()
 		local totalCalls = 0
-
 		while totemUpgradeInProgress do
 			local totems, err = scanTotems()
 			if not totems or #totems == 0 then
@@ -435,34 +424,27 @@ local function autoUpgradeTotems(targetTypeName, upgradeTypes, maxLevel)
 			end
 
 			local madeAnyCall = false
-
 			for _, t in ipairs(totems) do
 				if not totemUpgradeInProgress then break end
-
 				for _, upgradeType in ipairs(upgradeTypes) do
 					if not totemUpgradeInProgress then break end
-
 					local currentLevel = t.upgrades[upgradeType] or 0
-
 					if maxLevel <= 0 or currentLevel < maxLevel then
 						local ok, callErr = pcall(function()
 							upgradeRemote:InvokeServer(t.instance, targetTypeName, upgradeType)
 						end)
-
 						if ok then
-							totalCalls = totalCalls + 1
-							madeAnyCall = true
+							totalCalls   = totalCalls + 1
+							madeAnyCall  = true
 							TotemUpgradeStatus:SetDesc(string.format(
 								"Upgrading %s → %s (%s)\nTotal calls: %d",
 								t.name, targetTypeName, upgradeType, totalCalls
 							))
 						else
 							TotemUpgradeStatus:SetDesc(string.format(
-								"Error on %s (%s): %s",
-								t.name, upgradeType, tostring(callErr)
+								"Error on %s (%s): %s", t.name, upgradeType, tostring(callErr)
 							))
 						end
-
 						task.wait(totemUpgradeDelay)
 					end
 				end
@@ -470,12 +452,10 @@ local function autoUpgradeTotems(targetTypeName, upgradeTypes, maxLevel)
 
 			if not madeAnyCall then
 				TotemUpgradeStatus:SetDesc(string.format(
-					"All totems at max level (%d). Done.\nTotal calls: %d",
-					maxLevel, totalCalls
+					"All totems at max level (%d). Done.\nTotal calls: %d", maxLevel, totalCalls
 				))
 				break
 			end
-
 			task.wait(0.1)
 		end
 
@@ -484,7 +464,7 @@ local function autoUpgradeTotems(targetTypeName, upgradeTypes, maxLevel)
 	end)
 end
 
--- ─── Block helpers ─────────────────────────────────────────────────────────────
+-- ─── Block helpers ────────────────────────────────────────────────────────────
 
 local function isThreeBlock(part)
 	return part
@@ -504,16 +484,13 @@ end
 
 local function normalizeClickedBlock(target)
 	if not target then return nil end
-
 	if target.Name == "Top" and target.Parent and target.Parent:IsA("BasePart") then
 		target = target.Parent
 	end
-
 	if isIslandBlockPart(target) then return target end
 	if target.Parent and target.Parent:IsA("BasePart") and isIslandBlockPart(target.Parent) then
 		return target.Parent
 	end
-
 	return nil
 end
 
@@ -528,45 +505,45 @@ end
 local function createMarker(name, color)
 	local marker = Workspace:FindFirstChild(name)
 	if not marker then
-		marker = Instance.new("Part")
-		marker.Name = name
-		marker.Size = Vector3.new(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
-		marker.Anchored = true
+		marker            = Instance.new("Part")
+		marker.Name       = name
+		marker.Size       = Vector3.new(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
+		marker.Anchored   = true
 		marker.CanCollide = false
 		marker.CastShadow = false
-		marker.Material = Enum.Material.Neon
+		marker.Material   = Enum.Material.Neon
 		marker.Transparency = 0.35
-		marker.Parent = Workspace
+		marker.Parent     = Workspace
 	end
-
 	marker.Color = color
 	return marker
 end
 
 local function destroySelectionVisuals()
 	if selectionPart then selectionPart:Destroy(); selectionPart = nil end
-	if startMarker   then startMarker:Destroy();   startMarker = nil   end
-	if endMarker     then endMarker:Destroy();     endMarker = nil     end
+	if startMarker   then startMarker:Destroy();   startMarker   = nil end
+	if endMarker     then endMarker:Destroy();     endMarker     = nil end
 end
 
 local function countPreviewBlocks()
 	local count = 0
 	for _, child in ipairs(cloneFolder:GetChildren()) do
-		if child:IsA("BasePart") and child.Name ~= "PrimaryPart" then
-			count = count + 1
-		end
+		if child:IsA("BasePart") and child.Name ~= "PrimaryPart" then count = count + 1 end
 	end
 	return count
 end
 
 local function updatePreviewStatus()
-	PreviewStatus:SetDesc(string.format("%d preview blocks", countPreviewBlocks()))
+	PreviewStatus:SetDesc(string.format("%d preview blocks  |  rotation: %d°", countPreviewBlocks(), previewRotationDeg))
+end
+
+local function updateRotateStatus()
+	RotateStatus:SetDesc(string.format("Current rotation: %d°  (Y-axis, clockwise)", previewRotationDeg))
 end
 
 local function updateBlocksStatus()
 	local counts = {}
-	local total = 0
-
+	local total  = 0
 	for _, child in ipairs(cloneFolder:GetChildren()) do
 		if child:IsA("BasePart") and child.Name ~= "PrimaryPart" then
 			local name = child.Name
@@ -574,57 +551,44 @@ local function updateBlocksStatus()
 			total = total + 1
 		end
 	end
-
-	if total == 0 then
-		BlocksStatus:SetDesc("no preview loaded")
-		return
-	end
-
+	if total == 0 then BlocksStatus:SetDesc("no preview loaded"); return end
 	local sorted = {}
 	for name in pairs(counts) do table.insert(sorted, name) end
 	table.sort(sorted)
-
 	local lines = { string.format("Total: %d blocks", total), "" }
 	for _, name in ipairs(sorted) do
 		table.insert(lines, string.format("%s: %d", name, counts[name]))
 	end
-
 	BlocksStatus:SetDesc(table.concat(lines, "\n"))
 end
 
 local function updateSelectionStatus()
 	local startPos = selectionStartPos or (selectionStartBlock and selectionStartBlock.Position)
 	local endPos   = selectionEndPos   or (selectionEndBlock   and selectionEndBlock.Position)
-
 	if not startPos or not endPos then
 		SelectionStatus:SetDesc("pick a start and end block, or use step buttons")
 		return
 	end
-
 	local minX = math.min(startPos.X, endPos.X)
 	local minY = math.min(startPos.Y, endPos.Y)
 	local minZ = math.min(startPos.Z, endPos.Z)
 	local maxX = math.max(startPos.X, endPos.X)
 	local maxY = math.max(startPos.Y, endPos.Y)
 	local maxZ = math.max(startPos.Z, endPos.Z)
-
 	local sizeX = ((maxX - minX) / BLOCK_SIZE) + 1
 	local sizeY = ((maxY - minY) / BLOCK_SIZE) + 1
 	local sizeZ = ((maxZ - minZ) / BLOCK_SIZE) + 1
-	local totalCells = sizeX * sizeY * sizeZ
-
 	SelectionStatus:SetDesc(string.format(
 		"Start: (%d, %d, %d)\nEnd:   (%d, %d, %d)\nSize:  %dx%dx%d  (%d cells)",
 		startPos.X, startPos.Y, startPos.Z,
-		endPos.X,   endPos.Y,   endPos.Z,
-		sizeX, sizeY, sizeZ, totalCells
+		endPos.X, endPos.Y, endPos.Z,
+		sizeX, sizeY, sizeZ, sizeX * sizeY * sizeZ
 	))
 end
 
 local function rebuildSelectionPart()
 	local startPos = selectionStartPos or (selectionStartBlock and selectionStartBlock.Position)
 	local endPos   = selectionEndPos   or (selectionEndBlock   and selectionEndBlock.Position)
-
 	if not startPos or not endPos then return end
 
 	local minX = math.min(startPos.X, endPos.X)
@@ -638,25 +602,24 @@ local function rebuildSelectionPart()
 	local center = Vector3.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2)
 
 	if not selectionPart then
-		selectionPart = Instance.new("Part")
-		selectionPart.Name = SELECTION_PART_NAME
-		selectionPart.Anchored = true
-		selectionPart.CanCollide = false
-		selectionPart.CastShadow = false
-		selectionPart.Material = Enum.Material.Neon
-		selectionPart.Color = Color3.fromRGB(75, 170, 255)
+		selectionPart             = Instance.new("Part")
+		selectionPart.Name        = SELECTION_PART_NAME
+		selectionPart.Anchored    = true
+		selectionPart.CanCollide  = false
+		selectionPart.CastShadow  = false
+		selectionPart.Material    = Enum.Material.Neon
+		selectionPart.Color       = Color3.fromRGB(75, 170, 255)
 		selectionPart.Transparency = 0.8
-		selectionPart.Parent = Workspace
-
+		selectionPart.Parent      = Workspace
 		local box = Instance.new("SelectionBox")
-		box.LineThickness = 0.05
-		box.Color3 = Color3.fromRGB(75, 170, 255)
+		box.LineThickness       = 0.05
+		box.Color3              = Color3.fromRGB(75, 170, 255)
 		box.SurfaceTransparency = 1
-		box.Adornee = selectionPart
-		box.Parent = selectionPart
+		box.Adornee             = selectionPart
+		box.Parent              = selectionPart
 	end
 
-	selectionPart.Size = size
+	selectionPart.Size   = size
 	selectionPart.CFrame = CFrame.new(center)
 
 	if not startMarker then startMarker = createMarker(START_MARKER_NAME, Color3.fromRGB(70, 170, 255)) end
@@ -670,21 +633,19 @@ end
 
 local function moveCorner(corner, dx, dy, dz)
 	local step = selectionMoveStep * BLOCK_SIZE
-
 	if corner == "start" then
 		local pos = selectionStartPos or (selectionStartBlock and selectionStartBlock.Position) or Vector3.new(0, 0, 0)
-		selectionStartPos = pos + Vector3.new(dx * step, dy * step, dz * step)
+		selectionStartPos   = pos + Vector3.new(dx * step, dy * step, dz * step)
 		selectionStartBlock = nil
 		if not startMarker then startMarker = createMarker(START_MARKER_NAME, Color3.fromRGB(70, 170, 255)) end
 		startMarker.CFrame = CFrame.new(selectionStartPos)
 	else
 		local pos = selectionEndPos or (selectionEndBlock and selectionEndBlock.Position) or Vector3.new(0, 0, 0)
-		selectionEndPos = pos + Vector3.new(dx * step, dy * step, dz * step)
+		selectionEndPos   = pos + Vector3.new(dx * step, dy * step, dz * step)
 		selectionEndBlock = nil
 		if not endMarker then endMarker = createMarker(END_MARKER_NAME, Color3.fromRGB(255, 95, 95)) end
 		endMarker.CFrame = CFrame.new(selectionEndPos)
 	end
-
 	rebuildSelectionPart()
 end
 
@@ -698,7 +659,9 @@ end
 local function clearPreview()
 	for _, child in ipairs(cloneFolder:GetChildren()) do child:Destroy() end
 	cloneFolder.PrimaryPart = nil
+	previewRotationDeg      = 0
 	updatePreviewStatus()
+	updateRotateStatus()
 	updateBlocksStatus()
 end
 
@@ -715,44 +678,118 @@ local function ensurePreviewPrimaryPart()
 		return cloneFolder.PrimaryPart
 	end
 	for _, child in ipairs(cloneFolder:GetChildren()) do
-		if isPreviewBlock(child) then
-			cloneFolder.PrimaryPart = child
-			return child
-		end
+		if isPreviewBlock(child) then cloneFolder.PrimaryPart = child; return child end
 	end
 	return nil
 end
 
 local function buildLocalOffset(xBlocks, yBlocks, zBlocks)
-	local xStuds = (tonumber(xBlocks) or 0) * BLOCK_SIZE
-	local yStuds = (tonumber(yBlocks) or 0) * BLOCK_SIZE
-	local zStuds = (tonumber(zBlocks) or 0) * BLOCK_SIZE
-
+	local xStuds  = (tonumber(xBlocks) or 0) * BLOCK_SIZE
+	local yStuds  = (tonumber(yBlocks) or 0) * BLOCK_SIZE
+	local zStuds  = (tonumber(zBlocks) or 0) * BLOCK_SIZE
 	local primary = ensurePreviewPrimaryPart()
 	if not primary then return Vector3.new(xStuds, yStuds, zStuds) end
-
 	return (primary.CFrame.RightVector * xStuds)
-		+ (primary.CFrame.UpVector * yStuds)
-		+ (primary.CFrame.LookVector * zStuds)
+		+ (primary.CFrame.UpVector    * yStuds)
+		+ (primary.CFrame.LookVector  * zStuds)
 end
 
 local function movePreviewByBlocks(xBlocks, yBlocks, zBlocks)
 	local primary = ensurePreviewPrimaryPart()
-	if not primary then
-		notify("Preview", "Load or copy a preview first.", 3)
-		return false
-	end
+	if not primary then notify("Preview", "Load or copy a preview first.", 3); return false end
 	cloneFolder:SetPrimaryPartCFrame(primary.CFrame + buildLocalOffset(xBlocks, yBlocks, zBlocks))
 	return true
 end
+
+-- ─── Rotation & Flip ──────────────────────────────────────────────────────────
+--[[
+	Rotation is always around the Y-axis (vertical), using the bounding-box
+	centre of the preview as the pivot.  Flip X and Flip Z mirror the preview
+	across those axes through the same centre pivot.
+
+	All operations work by repositioning and reorienting every block CFrame
+	relative to the pivot; no model-level SetPrimaryPartCFrame tricks are needed
+	so the preview stays grid-aligned after each operation.
+]]
+
+local function getPreviewCentre()
+	local blocks = getPreviewBlocks()
+	if #blocks == 0 then return nil end
+	local minX, minY, minZ =  math.huge,  math.huge,  math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	for _, b in ipairs(blocks) do
+		local p = b.Position
+		if p.X < minX then minX = p.X end
+		if p.Y < minY then minY = p.Y end
+		if p.Z < minZ then minZ = p.Z end
+		if p.X > maxX then maxX = p.X end
+		if p.Y > maxY then maxY = p.Y end
+		if p.Z > maxZ then maxZ = p.Z end
+	end
+	return Vector3.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2)
+end
+
+local function applyTransformToPreview(transformFn)
+	-- transformFn receives a position relative to the pivot (Vector3) and
+	-- returns the new relative position (Vector3).
+	local centre = getPreviewCentre()
+	if not centre then notify("Rotate", "Load a preview first.", 3); return end
+	local blocks = getPreviewBlocks()
+	for _, b in ipairs(blocks) do
+		local rel       = b.Position - centre
+		local newRel    = transformFn(rel)
+		local snapped   = snapToGrid(centre + newRel)
+		b.CFrame        = CFrame.new(snapped)
+	end
+	updatePreviewStatus()
+	updateBlocksStatus()
+end
+
+local function rotatePreviewY(angleDeg)
+	-- Positive angleDeg = clockwise when viewed from above (standard Roblox Y-up).
+	local rad = math.rad(angleDeg)
+	local cos, sin = math.cos(rad), math.sin(rad)
+	applyTransformToPreview(function(rel)
+		return Vector3.new(
+			math.round(cos * rel.X + sin * rel.Z),
+			rel.Y,
+			math.round(-sin * rel.X + cos * rel.Z)
+		)
+	end)
+	previewRotationDeg = (previewRotationDeg + angleDeg) % 360
+	updateRotateStatus()
+	notify("Rotate", string.format("Rotated to %d°", previewRotationDeg), 2)
+end
+
+local function flipPreviewX()
+	applyTransformToPreview(function(rel)
+		return Vector3.new(-rel.X, rel.Y, rel.Z)
+	end)
+	notify("Rotate", "Flipped on X axis.", 2)
+end
+
+local function flipPreviewZ()
+	applyTransformToPreview(function(rel)
+		return Vector3.new(rel.X, rel.Y, -rel.Z)
+	end)
+	notify("Rotate", "Flipped on Z axis.", 2)
+end
+
+local function flipPreviewY()
+	-- Flip vertically (mirror across horizontal mid-plane — rare but handy)
+	applyTransformToPreview(function(rel)
+		return Vector3.new(rel.X, -rel.Y, rel.Z)
+	end)
+	notify("Rotate", "Flipped vertically (Y axis).", 2)
+end
+
+-- ─── Selection blocks ─────────────────────────────────────────────────────────
 
 local function getSelectionBlocks()
 	if not selectionPart then return nil, "Pick a start and end block first." end
 	local blocks = {}
 	for _, part in pairs(Workspace:GetPartsInPart(selectionPart)) do
-		if part.Parent and part.Parent.Name == "Blocks" then
-			table.insert(blocks, part)
-		end
+		if part.Parent and part.Parent.Name == "Blocks" then table.insert(blocks, part) end
 	end
 	if #blocks == 0 then return nil, "No island blocks were found inside the selection." end
 	return blocks
@@ -770,13 +807,13 @@ local function getSelectionOrigin(blocks)
 end
 
 local function buildSchematicData(blocks)
-	local origin = getSelectionOrigin(blocks)
+	local origin      = getSelectionOrigin(blocks)
 	local originCFrame = CFrame.new(origin)
 	local data = {
 		FormatVersion = 2,
-		BlockSize = BLOCK_SIZE,
-		Origin = { origin.X, origin.Y, origin.Z },
-		Blocks = {}
+		BlockSize     = BLOCK_SIZE,
+		Origin        = { origin.X, origin.Y, origin.Z },
+		Blocks        = {}
 	}
 
 	table.sort(blocks, function(a, b)
@@ -787,12 +824,10 @@ local function buildSchematicData(blocks)
 	end)
 
 	for _, block in ipairs(blocks) do
-		local relative = originCFrame:ToObjectSpace(block.CFrame)
+		local relative  = originCFrame:ToObjectSpace(block.CFrame)
 		local blockName = block.Name
-
 		if not data.Blocks[blockName] then data.Blocks[blockName] = {} end
-
-		table.insert(data.Blocks[blockName], { C = { relative.components(relative) } })
+		table.insert(data.Blocks[blockName], { C = { relative:GetComponents() } })
 	end
 
 	return data
@@ -804,9 +839,7 @@ local function stripComments(text)
 end
 
 local function decodeSchematicText(text)
-	if type(text) ~= "string" or text == "" then
-		return nil, "No schematic code was provided."
-	end
+	if type(text) ~= "string" or text == "" then return nil, "No schematic code was provided." end
 	local cleaned = stripComments(text)
 	local ok, decoded = pcall(function() return HttpService:JSONDecode(cleaned) end)
 	if not ok then return nil, tostring(decoded) end
@@ -827,18 +860,17 @@ local function spawnPreviewBlock(blockName, worldCFrame)
 	local previewName = normalizePreviewBlockName(blockName)
 	local blockFolder = blocksFolder:FindFirstChild(previewName)
 	if not blockFolder then warn("Preview block folder missing:", previewName); return nil end
-
 	local root = blockFolder:FindFirstChild("Root")
 	if not root then warn("Preview root missing:", previewName); return nil end
 
-	local previewBlock = root:Clone()
-	previewBlock.Name = previewName
-	previewBlock.Anchored = true
-	previewBlock.CanCollide = buildCollision
-	previewBlock.Transparency = 0.5
-	previewBlock.Locked = false
-	previewBlock.Parent = cloneFolder
-	previewBlock.CFrame = worldCFrame
+	local previewBlock             = root:Clone()
+	previewBlock.Name              = previewName
+	previewBlock.Anchored          = true
+	previewBlock.CanCollide        = buildCollision
+	previewBlock.Transparency      = 0.5
+	previewBlock.Locked            = false
+	previewBlock.Parent            = cloneFolder
+	previewBlock.CFrame            = worldCFrame
 	return previewBlock
 end
 
@@ -855,12 +887,11 @@ local function loadDecodedSchematic(decoded)
 			tonumber(origin[2]) or 0,
 			tonumber(origin[3]) or 0
 		)
-
 		for blockName, blockList in pairs(decodedBlocks) do
 			for _, block in ipairs(blockList) do
 				if block.C then
-					local relative = CFrame.new(unpack(block.C))
-					local world = originCFrame:ToWorldSpace(relative)
+					local relative = CFrame.new(table.unpack(block.C))
+					local world    = originCFrame:ToWorldSpace(relative)
 					if spawnPreviewBlock(blockName, world) then placed = placed + 1 end
 				end
 			end
@@ -878,7 +909,6 @@ local function loadDecodedSchematic(decoded)
 
 	updatePreviewStatus()
 	updateBlocksStatus()
-
 	if placed == 0 then return false, "No preview blocks could be loaded." end
 	return true, placed
 end
@@ -906,22 +936,21 @@ end
 
 local function getBlockControllerScript()
 	local playerScripts = LocalPlayer:FindFirstChild("PlayerScripts")
-	local ts = playerScripts and playerScripts:FindFirstChild("TS")
-	local flame = ts and ts:FindFirstChild("flame")
-	local controllers = flame and flame:FindFirstChild("controllers")
-	local blockFolder = controllers and controllers:FindFirstChild("block")
+	local ts            = playerScripts and playerScripts:FindFirstChild("TS")
+	local flame         = ts and ts:FindFirstChild("flame")
+	local controllers   = flame and flame:FindFirstChild("controllers")
+	local blockFolder   = controllers and controllers:FindFirstChild("block")
 	return blockFolder and blockFolder:FindFirstChild("block-controller")
 end
 
 local updateRemoteStatus
 
 local function savePlacementCache(hashName, hashValue)
-	local encoded = HttpService:JSONEncode({
+	writefile(PLACE_CACHE_FILE, HttpService:JSONEncode({
 		placeVersion = game.PlaceVersion,
-		hashName = hashName,
-		hashValue = hashValue
-	})
-	writefile(PLACE_CACHE_FILE, encoded)
+		hashName     = hashName,
+		hashValue    = hashValue
+	}))
 end
 
 local function loadPlacementCache()
@@ -937,23 +966,19 @@ local function setActivePlacementHash(hashName, hashValue, sourceLabel)
 	if type(hashName) ~= "string" or hashName == "" or type(hashValue) ~= "string" or hashValue == "" then
 		return false
 	end
-
-	placementHashName = hashName
+	placementHashName  = hashName
 	placementHashValue = hashValue
 	savePlacementCache(placementHashName, placementHashValue)
-	setRemoteDebugValue("BlockPlaceRemote", "CLIENT_BLOCK_PLACE_REQUEST")
+	setRemoteDebugValue("BlockPlaceRemote",  "CLIENT_BLOCK_PLACE_REQUEST")
 	setRemoteDebugValue("BlockPlaceHashData", placementHashName)
-	setRemoteDebugValue("BlockPlaceHash", placementHashValue)
+	setRemoteDebugValue("BlockPlaceHash",     placementHashValue)
 	updateRemoteStatus("placement hash ready (" .. tostring(sourceLabel or "unknown") .. ")")
 	return true
 end
 
 local function tryCapturePlacementHashFromPayload(payload, sourceLabel)
 	if type(payload) ~= "table" then return false end
-	local hasCFrame = payload.cframe ~= nil
-	local hasBlockType = payload.blockType ~= nil
-	if not hasCFrame or not hasBlockType then return false end
-
+	if not payload.cframe or not payload.blockType then return false end
 	for key, value in pairs(payload) do
 		if type(key) == "string" and type(value) == "string" then
 			if key ~= "blockType" and key ~= "cframe" and key ~= "upperBlock" then
@@ -966,7 +991,6 @@ local function tryCapturePlacementHashFromPayload(payload, sourceLabel)
 			end
 		end
 	end
-
 	return false
 end
 
@@ -979,16 +1003,14 @@ end
 
 local function installPlacementCaptureHook()
 	if placementCaptureInstalled then return true end
-
 	if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" or type(newcclosure) ~= "function" then
 		return false, "Your executor cannot hook __namecall for manual placement capture."
 	end
 
 	local oldNamecall
 	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-		local args = { ... }
+		local args   = { ... }
 		local method = getnamecallmethod()
-
 		if method == "InvokeServer"
 			and typeof(self) == "Instance"
 			and self.Name == "CLIENT_BLOCK_PLACE_REQUEST"
@@ -997,7 +1019,6 @@ local function installPlacementCaptureHook()
 			if type(checkcaller) == "function" then isGameCall = not checkcaller() end
 			if isGameCall then tryCapturePlacementHashFromArgs(args, "manual placement") end
 		end
-
 		return oldNamecall(self, ...)
 	end))
 
@@ -1009,7 +1030,6 @@ local function discoverPlacementHash()
 	if type(getgc) ~= "function" or type(getconstants) ~= "function" or type(getfenv) ~= "function" then
 		return nil, "Your executor is missing getgc/getconstants/getfenv."
 	end
-
 	local blockController = getBlockControllerScript()
 	if not blockController then return nil, "Could not find the block-controller script." end
 
@@ -1019,7 +1039,7 @@ local function discoverPlacementHash()
 			if env and env.script == blockController then
 				local ok, constants = pcall(getconstants, fn)
 				if ok and type(constants) == "table" then
-					local left  = constants[23]
+					local left   = constants[23]
 					local rightA = constants[25]
 					local rightB = constants[26]
 					if type(left) == "string" and type(rightA) == "string" and type(rightB) == "string" then
@@ -1029,7 +1049,6 @@ local function discoverPlacementHash()
 			end
 		end
 	end
-
 	return nil, "Could not discover the placement hash."
 end
 
@@ -1039,7 +1058,6 @@ end
 
 local function resolvePlacementHash(forceRefresh)
 	if placementHashName and placementHashValue and not forceRefresh then return true end
-
 	if not forceRefresh then
 		local cachedName, cachedValue = loadPlacementCache()
 		if cachedName and cachedValue then
@@ -1047,83 +1065,67 @@ local function resolvePlacementHash(forceRefresh)
 			return true
 		end
 	end
-
 	local hashName, hashValueOrError = discoverPlacementHash()
-	if not hashName then
-		updateRemoteStatus(hashValueOrError)
-		return false, hashValueOrError
-	end
-
+	if not hashName then updateRemoteStatus(hashValueOrError); return false, hashValueOrError end
 	setActivePlacementHash(hashName, hashValueOrError, "auto scan")
 	return true
 end
 
 local function placeBlockRequest(blockCFrame, blockName)
 	if not netManaged then return false, "NetManaged could not be found." end
-
 	if not placementHashName or not placementHashValue then
 		local ok, err = resolvePlacementHash(false)
 		if not ok then return false, err end
 	end
-
 	local placeRemote = netManaged:FindFirstChild("CLIENT_BLOCK_PLACE_REQUEST")
 	if not placeRemote then return false, "CLIENT_BLOCK_PLACE_REQUEST was not found." end
 
 	local args = {
 		upperBlock = false,
-		cframe = blockCFrame,
-		blockType = normalizePlaceBlockName(blockName)
+		cframe     = blockCFrame,
+		blockType  = normalizePlaceBlockName(blockName)
 	}
 	args[placementHashName] = placementHashValue
-
 	return pcall(function() placeRemote:InvokeServer(args) end)
 end
 
--- ─── Mouse click picking ─────────────────────────────────────────────────────
+-- ─── Mouse click picking ──────────────────────────────────────────────────────
 
 Mouse.Button1Down:Connect(function()
 	if not selectionPickMode then return end
-
 	local clickedBlock = normalizeClickedBlock(Mouse.Target)
-	if not clickedBlock then
-		notify("Selection", "Click a 3x3 island block.", 3)
-		return
-	end
+	if not clickedBlock then notify("Selection", "Click a 3x3 island block.", 3); return end
 
 	if selectionPickMode == "start" then
 		selectionStartBlock = clickedBlock
-		selectionStartPos = nil
-		startMarker = createMarker(START_MARKER_NAME, Color3.fromRGB(70, 170, 255))
-		startMarker.CFrame = clickedBlock.CFrame
+		selectionStartPos   = nil
+		startMarker         = createMarker(START_MARKER_NAME, Color3.fromRGB(70, 170, 255))
+		startMarker.CFrame  = clickedBlock.CFrame
 		notify("Selection", "Start corner picked.", 2)
 	elseif selectionPickMode == "end" then
-		selectionEndBlock = clickedBlock
-		selectionEndPos = nil
-		endMarker = createMarker(END_MARKER_NAME, Color3.fromRGB(255, 95, 95))
-		endMarker.CFrame = clickedBlock.CFrame
+		selectionEndBlock  = clickedBlock
+		selectionEndPos    = nil
+		endMarker          = createMarker(END_MARKER_NAME, Color3.fromRGB(255, 95, 95))
+		endMarker.CFrame   = clickedBlock.CFrame
 		notify("Selection", "End corner picked.", 2)
 	end
 
 	selectionPickMode = nil
-
 	local startPos = selectionStartPos or (selectionStartBlock and selectionStartBlock.Position)
 	local endPos   = selectionEndPos   or (selectionEndBlock   and selectionEndBlock.Position)
 	if startPos and endPos then rebuildSelectionPart() end
-
 	updateSelectionStatus()
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Remote Tab
+-- UI — Remote
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 RemoteSection:AddButton({
-	Title = "Resolve Placement Remote",
-	Description = "",
+	Title = "Resolve Placement Remote", Description = "",
 	Callback = function()
 		local hookOk, hookErr = installPlacementCaptureHook()
 		if not hookOk then notify("Remote", tostring(hookErr), 5) end
-
 		local ok, err = resolvePlacementHash(true)
 		if ok then
 			notify("Remote", "Placement hash refreshed successfully.", 3)
@@ -1135,33 +1137,22 @@ RemoteSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Selection
+-- UI — Selection
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 SelectionSection:AddButton({
-	Title = "Pick Start Corner (Click)",
-	Description = "then click a block in the world",
-	Callback = function()
-		selectionPickMode = "start"
-		notify("Selection", "Click the first corner block.", 3)
-	end
+	Title = "Pick Start Corner (Click)", Description = "then click a block in the world",
+	Callback = function() selectionPickMode = "start"; notify("Selection", "Click the first corner block.", 3) end
 })
 
 SelectionSection:AddButton({
-	Title = "Pick End Corner (Click)",
-	Description = "then click a block in the world",
-	Callback = function()
-		selectionPickMode = "end"
-		notify("Selection", "Click the opposite corner block.", 3)
-	end
+	Title = "Pick End Corner (Click)", Description = "then click a block in the world",
+	Callback = function() selectionPickMode = "end"; notify("Selection", "Click the opposite corner block.", 3) end
 })
 
 SelectionSection:AddInput("SelectionMoveStep", {
-	Title = "Corner Move Step (Blocks)",
-	Default = "1",
-	Placeholder = "1",
-	Numeric = true,
-	Finished = false,
+	Title = "Corner Move Step (Blocks)", Default = "1", Placeholder = "1",
+	Numeric = true, Finished = false,
 	Callback = function(value) selectionMoveStep = math.max(1, tonumber(value) or 1) end
 })
 
@@ -1195,8 +1186,8 @@ SelectionSection:AddButton({
 	Title = "Clear Selection", Description = "",
 	Callback = function()
 		selectionStartBlock = nil; selectionEndBlock = nil
-		selectionStartPos = nil;   selectionEndPos = nil
-		selectionPickMode = nil
+		selectionStartPos   = nil; selectionEndPos   = nil
+		selectionPickMode   = nil
 		destroySelectionVisuals()
 		updateSelectionStatus()
 	end
@@ -1219,16 +1210,12 @@ SelectionSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Storage
+-- UI — Storage
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 local FileDropdown = StorageSection:AddDropdown("SchematicFiles", {
-	Title = "Files",
-	Values = getSchematicFileNames(),
-	Multi = false,
-	Default = 1
+	Title = "Files", Values = getSchematicFileNames(), Multi = false, Default = 1
 })
-
 FileDropdown:OnChanged(function(value)
 	if type(value) == "string" and value ~= "" then currentFileName = value end
 end)
@@ -1238,11 +1225,8 @@ task.spawn(function()
 end)
 
 StorageSection:AddInput("SchematicFileName", {
-	Title = "File Name",
-	Default = currentFileName,
-	Placeholder = "Template.json",
-	Numeric = false,
-	Finished = false,
+	Title = "File Name", Default = currentFileName, Placeholder = "Template.json",
+	Numeric = false, Finished = false,
 	Callback = function(value) currentFileName = ensureJsonExtension(value) end
 })
 
@@ -1255,11 +1239,9 @@ StorageSection:AddButton({
 	Callback = function()
 		local blocks, err = getSelectionBlocks()
 		if not blocks then notify("Save", tostring(err), 4); return end
-
-		local data = buildSchematicData(blocks)
+		local data    = buildSchematicData(blocks)
 		local encoded = HttpService:JSONEncode(data)
-		local path = getSchematicPath(currentFileName)
-
+		local path    = getSchematicPath(currentFileName)
 		writefile(path, encoded)
 		lastSavedJson = encoded
 		currentFileName = ensureJsonExtension(currentFileName)
@@ -1273,9 +1255,7 @@ StorageSection:AddButton({
 	Callback = function()
 		local path = getSchematicPath(currentFileName)
 		if not isfile(path) then notify("Load", "That file does not exist yet.", 4); return end
-
-		local fileData = readfile(path)
-		local ok, result = loadSchematicText(fileData)
+		local ok, result = loadSchematicText(readfile(path))
 		if ok then
 			notify("Load", string.format("Loaded %d preview blocks from file.", result), 4)
 		else
@@ -1302,11 +1282,8 @@ StorageSection:AddButton({
 })
 
 StorageSection:AddInput("ImportCodeInput", {
-	Title = "Import Code",
-	Default = "",
-	Placeholder = "paste exported json here",
-	Numeric = false,
-	Finished = false,
+	Title = "Import Code", Default = "", Placeholder = "paste exported json here",
+	Numeric = false, Finished = false,
 	Callback = function(value) importCodeValue = value or "" end
 })
 
@@ -1338,14 +1315,12 @@ StorageSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Preview
+-- UI — Preview
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 local BuildCollisionToggle = PreviewSection:AddToggle("BuildCollision", {
-	Title = "Build Collision",
-	Default = true
+	Title = "Build Collision", Default = true
 })
-
 BuildCollisionToggle:OnChanged(function(value)
 	buildCollision = value
 	for _, block in ipairs(getPreviewBlocks()) do block.CanCollide = buildCollision end
@@ -1364,20 +1339,18 @@ PreviewSection:AddButton({ Title = "Move Preview Right",   Description = "", Cal
 PreviewSection:AddButton({ Title = "Move Preview Forward", Description = "", Callback = function() movePreviewByBlocks(0, 0,  moveStepBlocks) end })
 PreviewSection:AddButton({ Title = "Move Preview Back",    Description = "", Callback = function() movePreviewByBlocks(0, 0, -moveStepBlocks) end })
 
-PreviewSection:AddInput("DuplicateCount",   { Title = "Extra Copies",   Default = "1", Placeholder = "1", Numeric = true, Finished = false, Callback = function(v) duplicateCount   = math.max(1, tonumber(v) or 1) end })
-PreviewSection:AddInput("DuplicateOffsetX", { Title = "Copy Offset X",  Default = "0", Placeholder = "0", Numeric = true, Finished = false, Callback = function(v) duplicateOffsetX = tonumber(v) or 0 end })
-PreviewSection:AddInput("DuplicateOffsetY", { Title = "Copy Offset Y",  Default = "0", Placeholder = "0", Numeric = true, Finished = false, Callback = function(v) duplicateOffsetY = tonumber(v) or 0 end })
-PreviewSection:AddInput("DuplicateOffsetZ", { Title = "Copy Offset Z",  Default = "0", Placeholder = "0", Numeric = true, Finished = false, Callback = function(v) duplicateOffsetZ = tonumber(v) or 0 end })
+PreviewSection:AddInput("DuplicateCount",   { Title = "Extra Copies",  Default = "1", Placeholder = "1", Numeric = true, Finished = false, Callback = function(v) duplicateCount   = math.max(1, tonumber(v) or 1) end })
+PreviewSection:AddInput("DuplicateOffsetX", { Title = "Copy Offset X", Default = "0", Placeholder = "0", Numeric = true, Finished = false, Callback = function(v) duplicateOffsetX = tonumber(v) or 0 end })
+PreviewSection:AddInput("DuplicateOffsetY", { Title = "Copy Offset Y", Default = "0", Placeholder = "0", Numeric = true, Finished = false, Callback = function(v) duplicateOffsetY = tonumber(v) or 0 end })
+PreviewSection:AddInput("DuplicateOffsetZ", { Title = "Copy Offset Z", Default = "0", Placeholder = "0", Numeric = true, Finished = false, Callback = function(v) duplicateOffsetZ = tonumber(v) or 0 end })
 
 PreviewSection:AddButton({
 	Title = "Duplicate Preview", Description = "",
 	Callback = function()
 		local previewBlocks = getPreviewBlocks()
 		if #previewBlocks == 0 then notify("Preview", "Load or copy a preview first.", 4); return end
-
 		local snapshot = {}
 		for _, b in ipairs(previewBlocks) do table.insert(snapshot, { name = b.Name, cframe = b.CFrame }) end
-
 		local added = 0
 		for copyIndex = 1, duplicateCount do
 			local offset = buildLocalOffset(duplicateOffsetX * copyIndex, duplicateOffsetY * copyIndex, duplicateOffsetZ * copyIndex)
@@ -1385,7 +1358,6 @@ PreviewSection:AddButton({
 				if spawnPreviewBlock(b.name, b.cframe + offset) then added = added + 1 end
 			end
 		end
-
 		updatePreviewStatus()
 		updateBlocksStatus()
 		notify("Preview", string.format("Added %d duplicate preview blocks.", added), 4)
@@ -1401,7 +1373,60 @@ PreviewSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Blocks In Build
+-- UI — Rotate & Flip  (NEW SECTION)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+RotateSection:AddButton({
+	Title = "Rotate 90° Clockwise",
+	Description = "rotates around the vertical (Y) axis",
+	Callback = function() rotatePreviewY(90) end
+})
+
+RotateSection:AddButton({
+	Title = "Rotate 90° Counter-Clockwise",
+	Description = "rotates around the vertical (Y) axis",
+	Callback = function() rotatePreviewY(-90) end
+})
+
+RotateSection:AddButton({
+	Title = "Rotate 180°",
+	Description = "half-turn — same as two 90° rotations",
+	Callback = function() rotatePreviewY(180) end
+})
+
+RotateSection:AddButton({
+	Title = "Reset Rotation to 0°",
+	Description = "un-rotate back to original orientation",
+	Callback = function()
+		-- Rotate by the negative of the current accumulated angle
+		local correction = (360 - previewRotationDeg) % 360
+		if correction ~= 0 then rotatePreviewY(correction) end
+		previewRotationDeg = 0
+		updateRotateStatus()
+		notify("Rotate", "Rotation reset to 0°.", 2)
+	end
+})
+
+RotateSection:AddButton({
+	Title = "Flip on X Axis  (mirror left/right)",
+	Description = "mirrors the build across the X axis through its centre",
+	Callback = function() flipPreviewX() end
+})
+
+RotateSection:AddButton({
+	Title = "Flip on Z Axis  (mirror front/back)",
+	Description = "mirrors the build across the Z axis through its centre",
+	Callback = function() flipPreviewZ() end
+})
+
+RotateSection:AddButton({
+	Title = "Flip Vertically  (mirror top/bottom)",
+	Description = "mirrors the build upside-down through its centre",
+	Callback = function() flipPreviewY() end
+})
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- UI — Blocks In Build
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 BlocksSection:AddButton({
@@ -1411,12 +1436,11 @@ BlocksSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Paste
+-- UI — Paste
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 local function pastePreview()
 	if pasteInProgress then notify("Paste", "A paste is already running.", 3); return end
-
 	local previewBlocks = getPreviewBlocks()
 	if #previewBlocks == 0 then notify("Paste", "Load or copy a preview first.", 3); return end
 
@@ -1428,8 +1452,8 @@ local function pastePreview()
 	task.spawn(function()
 		local pending = {}
 		for _, block in ipairs(previewBlocks) do table.insert(pending, block) end
-		local total = #pending
-		local placed = 0
+		local total          = #pending
+		local placed         = 0
 		local noProgressLoops = 0
 
 		while pasteInProgress and #pending > 0 do
@@ -1487,17 +1511,13 @@ PasteSection:AddButton({ Title = "Paste Preview",  Description = "", Callback = 
 PasteSection:AddButton({
 	Title = "Stop Paste", Description = "",
 	Callback = function()
-		if pasteInProgress then
-			pasteInProgress = false
-			notify("Paste", "Paste stopped.", 3)
-		else
-			notify("Paste", "No paste is running.", 3)
-		end
+		if pasteInProgress then pasteInProgress = false; notify("Paste", "Paste stopped.", 3)
+		else notify("Paste", "No paste is running.", 3) end
 	end
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Totem Tab: Scanner
+-- UI — Totem Tab: Scanner
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 TotemScanSection:AddButton({
@@ -1517,12 +1537,90 @@ TotemScanSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Totem Tab: Save / Load
+-- UI — Totem Tab: Save / Load  (PERSISTENT SLOT SYSTEM)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
+TotemStorageSection:AddInput("TotemSaveSlotName", {
+	Title = "Save Slot Name",
+	Default = "default",
+	Placeholder = "e.g. island1, backup, etc.",
+	Numeric = false,
+	Finished = false,
+	Callback = function(value)
+		totemSaveSlotName = tostring(value or "default"):gsub("^%s+", ""):gsub("%s+$", "")
+		if totemSaveSlotName == "" then totemSaveSlotName = "default" end
+	end
+})
+
 TotemStorageSection:AddButton({
-	Title = "Save Totem Data To File",
-	Description = "appends TotemData to current schematic JSON",
+	Title = "Save Totems To Slot",
+	Description = "saves current island totem data into the named slot",
+	Callback = function()
+		local ok, result = saveTotemSlot(totemSaveSlotName)
+		if ok then
+			notify("Totems", string.format("Saved %d totem(s) to slot '%s'.", result, totemSaveSlotName), 4)
+			TotemStorageStatus:SetDesc(formatTotemSlotList())
+		else
+			notify("Totems", tostring(result), 5)
+		end
+	end
+})
+
+TotemStorageSection:AddButton({
+	Title = "Load Totems From Slot",
+	Description = "loads totem data from the named slot and shows it",
+	Callback = function()
+		local totemData, savedAt = loadTotemSlot(totemSaveSlotName)
+		if not totemData then
+			notify("Totems", tostring(savedAt), 5)
+			return
+		end
+
+		local lines = {
+			string.format("Slot '%s'  (saved %s):", totemSaveSlotName, os.date("%H:%M:%S", savedAt)),
+			""
+		}
+		for _, t in ipairs(totemData) do
+			table.insert(lines, "» " .. t.name)
+			for _, upgradeType in ipairs(TOTEM_UPGRADE_TYPES) do
+				table.insert(lines, string.format("  %s: %d", upgradeType, t.upgrades and t.upgrades[upgradeType] or 0))
+			end
+			table.insert(lines, "")
+		end
+
+		TotemScanStatus:SetDesc(table.concat(lines, "\n"))
+		notify("Totems", string.format("Loaded totem data for %d totem(s) from slot '%s'.", #totemData, totemSaveSlotName), 4)
+	end
+})
+
+TotemStorageSection:AddButton({
+	Title = "Delete Slot",
+	Description = "permanently removes the named slot from storage",
+	Callback = function()
+		local ok, err = deleteTotemSlot(totemSaveSlotName)
+		if ok then
+			notify("Totems", string.format("Deleted slot '%s'.", totemSaveSlotName), 3)
+			TotemStorageStatus:SetDesc(formatTotemSlotList())
+		else
+			notify("Totems", tostring(err), 4)
+		end
+	end
+})
+
+TotemStorageSection:AddButton({
+	Title = "List All Saved Slots",
+	Description = "shows every slot stored on disk",
+	Callback = function()
+		local text = formatTotemSlotList()
+		TotemStorageStatus:SetDesc(text)
+		notify("Totems", "Slot list refreshed.", 2)
+	end
+})
+
+-- Keep schematic-embedded totem save/load for backwards compat
+TotemStorageSection:AddButton({
+	Title = "Embed Totem Data In Schematic File",
+	Description = "appends TotemData into the current schematic JSON",
 	Callback = function()
 		local ok, result = saveTotemDataToFile(currentFileName)
 		if ok then
@@ -1533,113 +1631,57 @@ TotemStorageSection:AddButton({
 	end
 })
 
-TotemStorageSection:AddButton({
-	Title = "Load & Preview Totem Data",
-	Description = "shows saved totem upgrade levels from file",
-	Callback = function()
-		local totemData, err = loadTotemDataFromFile(currentFileName)
-		if not totemData then
-			notify("Totems", tostring(err), 5)
-			return
-		end
-
-		local lines = { string.format("Loaded %d totem(s) from file:", #totemData), "" }
-		for _, t in ipairs(totemData) do
-			table.insert(lines, "» " .. t.name)
-			for _, upgradeType in ipairs(TOTEM_UPGRADE_TYPES) do
-				table.insert(lines, string.format("  %s: %d", upgradeType, t.upgrades and t.upgrades[upgradeType] or 0))
-			end
-			table.insert(lines, "")
-		end
-
-		TotemScanStatus:SetDesc(table.concat(lines, "\n"))
-		notify("Totems", string.format("Loaded totem data for %d totem(s).", #totemData), 4)
-	end
-})
-
 -- ═══════════════════════════════════════════════════════════════════════════════
--- UI BUTTONS — Totem Tab: Auto-Upgrader
+-- UI — Totem Tab: Auto-Upgrader
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- Target upgrade type name input (e.g. "totem_rock", "totem_stone", etc.)
 TotemUpgradeSection:AddInput("TotemUpgradeTarget", {
-	Title = "Upgrade Tier Name",
-	Default = "totem_rock",
-	Placeholder = "totem_rock",
-	Numeric = false,
-	Finished = false,
-	Callback = function(value)
-		totemUpgradeTarget = tostring(value or "totem_rock"):gsub("%s+", "")
-	end
+	Title = "Upgrade Tier Name", Default = "totem_rock", Placeholder = "totem_rock",
+	Numeric = false, Finished = false,
+	Callback = function(value) totemUpgradeTarget = tostring(value or "totem_rock"):gsub("%s+", "") end
 })
 
--- Delay between calls
 TotemUpgradeSection:AddInput("TotemUpgradeDelay", {
-	Title = "Delay Between Calls (s)",
-	Default = "0.3",
-	Placeholder = "0.3",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		totemUpgradeDelay = math.max(0.05, tonumber(value) or 0.3)
-	end
+	Title = "Delay Between Calls (s)", Default = "0.3", Placeholder = "0.3",
+	Numeric = true, Finished = false,
+	Callback = function(value) totemUpgradeDelay = math.max(0.05, tonumber(value) or 0.3) end
 })
 
--- Max upgrade level per stat (0 = keep calling forever until server rejects)
 local totemMaxLevel = 0
 TotemUpgradeSection:AddInput("TotemMaxLevel", {
-	Title = "Max Level Per Stat (0 = unlimited)",
-	Default = "0",
-	Placeholder = "0",
-	Numeric = true,
-	Finished = false,
-	Callback = function(value)
-		totemMaxLevel = math.max(0, math.floor(tonumber(value) or 0))
-	end
+	Title = "Max Level Per Stat (0 = unlimited)", Default = "0", Placeholder = "0",
+	Numeric = true, Finished = false,
+	Callback = function(value) totemMaxLevel = math.max(0, math.floor(tonumber(value) or 0)) end
 })
 
--- Toggle which upgrade types to run
 local activeUpgradeTypes = { efficiency = true, quality = true, utility = true }
 
-TotemUpgradeSection:AddToggle("UpgradeEfficiency", {
-	Title = "Upgrade: Efficiency", Default = true
-}):OnChanged(function(v) activeUpgradeTypes.efficiency = v end)
+TotemUpgradeSection:AddToggle("UpgradeEfficiency", { Title = "Upgrade: Efficiency", Default = true })
+	:OnChanged(function(v) activeUpgradeTypes.efficiency = v end)
 
-TotemUpgradeSection:AddToggle("UpgradeQuality", {
-	Title = "Upgrade: Quality", Default = true
-}):OnChanged(function(v) activeUpgradeTypes.quality = v end)
+TotemUpgradeSection:AddToggle("UpgradeQuality", { Title = "Upgrade: Quality", Default = true })
+	:OnChanged(function(v) activeUpgradeTypes.quality = v end)
 
-TotemUpgradeSection:AddToggle("UpgradeUtility", {
-	Title = "Upgrade: Utility", Default = true
-}):OnChanged(function(v) activeUpgradeTypes.utility = v end)
+TotemUpgradeSection:AddToggle("UpgradeUtility", { Title = "Upgrade: Utility", Default = true })
+	:OnChanged(function(v) activeUpgradeTypes.utility = v end)
 
 TotemUpgradeSection:AddButton({
 	Title = "Start Auto-Upgrader",
 	Description = "fires UpgradeBlock for all totems on your island",
 	Callback = function()
-		if totemUpgradeInProgress then
-			notify("Totems", "Upgrader is already running.", 3)
-			return
-		end
-
+		if totemUpgradeInProgress then notify("Totems", "Upgrader is already running.", 3); return end
 		local upgradeTypes = {}
 		for _, t in ipairs(TOTEM_UPGRADE_TYPES) do
 			if activeUpgradeTypes[t] then table.insert(upgradeTypes, t) end
 		end
-
-		if #upgradeTypes == 0 then
-			notify("Totems", "Enable at least one upgrade type toggle first.", 3)
-			return
-		end
-
+		if #upgradeTypes == 0 then notify("Totems", "Enable at least one upgrade type toggle first.", 3); return end
 		notify("Totems", string.format("Starting upgrader → %s (%s)", totemUpgradeTarget, table.concat(upgradeTypes, ", ")), 4)
 		autoUpgradeTotems(totemUpgradeTarget, upgradeTypes, totemMaxLevel)
 	end
 })
 
 TotemUpgradeSection:AddButton({
-	Title = "Stop Auto-Upgrader",
-	Description = "",
+	Title = "Stop Auto-Upgrader", Description = "",
 	Callback = function()
 		if totemUpgradeInProgress then
 			totemUpgradeInProgress = false
@@ -1651,44 +1693,30 @@ TotemUpgradeSection:AddButton({
 	end
 })
 
--- One-shot: fire all three upgrade types once per totem (no loop)
 TotemUpgradeSection:AddButton({
 	Title = "Upgrade Once (Single Pass)",
 	Description = "fires each active upgrade type once per totem, then stops",
 	Callback = function()
 		local upgradeRemote = netManaged and netManaged:FindFirstChild("UpgradeBlock")
-		if not upgradeRemote then
-			notify("Totems", "UpgradeBlock remote not found.", 5)
-			return
-		end
+		if not upgradeRemote then notify("Totems", "UpgradeBlock remote not found.", 5); return end
 
 		local upgradeTypes = {}
 		for _, t in ipairs(TOTEM_UPGRADE_TYPES) do
 			if activeUpgradeTypes[t] then table.insert(upgradeTypes, t) end
 		end
-
-		if #upgradeTypes == 0 then
-			notify("Totems", "Enable at least one upgrade type toggle first.", 3)
-			return
-		end
+		if #upgradeTypes == 0 then notify("Totems", "Enable at least one upgrade type toggle first.", 3); return end
 
 		local totems, err = scanTotems()
-		if not totems or #totems == 0 then
-			notify("Totems", tostring(err or "No totems found."), 5)
-			return
-		end
+		if not totems or #totems == 0 then notify("Totems", tostring(err or "No totems found."), 5); return end
 
 		local calls = 0
 		for _, t in ipairs(totems) do
 			for _, upgradeType in ipairs(upgradeTypes) do
-				pcall(function()
-					upgradeRemote:InvokeServer(t.instance, totemUpgradeTarget, upgradeType)
-				end)
+				pcall(function() upgradeRemote:InvokeServer(t.instance, totemUpgradeTarget, upgradeType) end)
 				calls = calls + 1
 				task.wait(totemUpgradeDelay)
 			end
 		end
-
 		notify("Totems", string.format("Single pass done. %d upgrade calls fired.", calls), 4)
 	end
 })
@@ -1719,6 +1747,10 @@ task.spawn(function()
 		notify("Remote", tostring(err) .. " Place one block manually and the script should capture it.", 6)
 		if hookOk then updateRemoteStatus("place one block manually to capture the placement hash") end
 	end
+
+	-- Populate totem slot list on load
+	TotemStorageStatus:SetDesc(formatTotemSlotList())
 end)
 
-notify("Loaded", "Islands schematic + totem script loaded.", 4)
+updateRotateStatus()
+notify("Loaded", "Islands schematic + rotate + totem-save script loaded.", 4)
