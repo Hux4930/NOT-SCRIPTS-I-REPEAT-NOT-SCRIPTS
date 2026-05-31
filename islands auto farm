@@ -1,0 +1,48 @@
+task.spawn(function()
+    local function GetAllEntityFolders()
+        local folders = {}
+        if workspace:FindFirstChild("WildernessIsland") and workspace.WildernessIsland:FindFirstChild("Entities") then
+            table.insert(folders, workspace.WildernessIsland.Entities)
+        end
+        local islands = workspace:FindFirstChild("Islands")
+        if islands then
+            for _, island in ipairs(islands:GetChildren()) do
+                if island:FindFirstChild("Entities") then
+                    table.insert(folders, island.Entities)
+                end
+            end
+        end
+        -- Also check entire workspace just in case
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj:FindFirstChild("Entities") then
+                local alreadyAdded = false
+                for _, f in ipairs(folders) do if f == obj.Entities then alreadyAdded = true end end
+                if not alreadyAdded then
+                    print("[Debug] Found extra entity folder in: " .. obj.Name)
+                    table.insert(folders, obj.Entities)
+                end
+            end
+        end
+        return folders
+    end
+
+    print("=== ENTITY FOLDER SCAN ===")
+    local folders = GetAllEntityFolders()
+    if #folders == 0 then
+        print("NO ENTITY FOLDERS FOUND AT ALL - workspace structure may be different")
+        -- Dump top level workspace children so we can see whats there
+        print("=== WORKSPACE CHILDREN ===")
+        for _, obj in ipairs(workspace:GetChildren()) do
+            print("  " .. obj.ClassName .. ": " .. obj.Name)
+        end
+    else
+        for _, folder in ipairs(folders) do
+            print("Folder: " .. folder:GetFullName() .. " | Children: " .. #folder:GetChildren())
+            for _, mob in ipairs(folder:GetChildren()) do
+                local humanoid = mob:FindFirstChildOfClass("Humanoid")
+                print("  MOB: [" .. mob.Name .. "] | HP: " .. tostring(humanoid and math.floor(humanoid.Health) or "NO HUMANOID"))
+            end
+        end
+    end
+    print("=== END SCAN ===")
+end)
