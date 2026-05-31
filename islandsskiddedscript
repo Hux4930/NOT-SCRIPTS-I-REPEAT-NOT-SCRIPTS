@@ -1162,35 +1162,44 @@ local function StartKillAura()
                         local mobHrp = mob.HumanoidRootPart; local dist = (hrp.Position - mobHrp.Position).Magnitude
                         if dist <= getgenv().KillAuraRadius and mobHrp.Parent then
 
-                            -- Smooth lerp to 6 studs below the mob's HRP
-                            local targetPos = mobHrp.Position - Vector3.new(0, 6, 0)
-                            local targetCFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
-                            local startCFrame = hrp.CFrame
-                            local duration = 0.15
-                            local elapsed = 0
-
                             local humanoid = char:FindFirstChildOfClass("Humanoid")
                             if humanoid then humanoid.PlatformStand = true end
                             hrp.Anchored = true
+
+                            -- Smooth lerp to 6 studs below mob, tracking mob movement
+                            local duration = 0.15
+                            local elapsed = 0
+                            local startCFrame = hrp.CFrame
 
                             local lerpConn
                             lerpConn = game:GetService("RunService").Heartbeat:Connect(function(dt)
                                 elapsed = elapsed + dt
                                 local alpha = math.clamp(elapsed / duration, 0, 1)
                                 local t = alpha * alpha * (3 - 2 * alpha)
-                                hrp.CFrame = startCFrame:Lerp(targetCFrame, t)
+
+                                -- Recalculate target every frame so it follows the mob
+                                if mobHrp and mobHrp.Parent then
+                                    local targetPos = mobHrp.Position - Vector3.new(0, 6, 0)
+                                    local targetCFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
+                                    hrp.CFrame = startCFrame:Lerp(targetCFrame, t)
+                                end
                             end)
 
                             repeat task_wait() until elapsed >= duration
                             lerpConn:Disconnect()
-                            hrp.CFrame = targetCFrame
 
-                            -- Lock position while hitting this mob
-                            local lockedCFrame = hrp.CFrame
+                            -- Snap to final position under mob (in case mob moved at end of lerp)
+                            if mobHrp and mobHrp.Parent then
+                                local targetPos = mobHrp.Position - Vector3.new(0, 6, 0)
+                                hrp.CFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
+                            end
+
+                            -- Continuously track mob position while hitting
                             local posLockConn
                             posLockConn = game:GetService("RunService").Heartbeat:Connect(function()
-                                if hrp and hrp.Parent then
-                                    hrp.CFrame = lockedCFrame
+                                if hrp and hrp.Parent and mobHrp and mobHrp.Parent then
+                                    local targetPos = mobHrp.Position - Vector3.new(0, 6, 0)
+                                    hrp.CFrame = CFrame.new(targetPos, targetPos + (hrp.CFrame.LookVector * Vector3.new(1, 0, 1)))
                                 end
                             end)
 
