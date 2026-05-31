@@ -683,21 +683,28 @@ local function ensurePreviewPrimaryPart()
 	return nil
 end
 
-local function buildLocalOffset(xBlocks, yBlocks, zBlocks)
-	local xStuds  = (tonumber(xBlocks) or 0) * BLOCK_SIZE
-	local yStuds  = (tonumber(yBlocks) or 0) * BLOCK_SIZE
-	local zStuds  = (tonumber(zBlocks) or 0) * BLOCK_SIZE
-	local primary = ensurePreviewPrimaryPart()
-	if not primary then return Vector3.new(xStuds, yStuds, zStuds) end
-	return (primary.CFrame.RightVector * xStuds)
-		+ (primary.CFrame.UpVector    * yStuds)
-		+ (primary.CFrame.LookVector  * zStuds)
-end
+-- (movement is now world-axis; see movePreviewByBlocks below)
 
 local function movePreviewByBlocks(xBlocks, yBlocks, zBlocks)
+	-- Move the ENTIRE preview group by a fixed world-axis offset (like Roblox Studio's
+	-- Move tool with grid snap).  Always X=right, Y=up, Z=forward — never camera-relative.
+	local blocks = getPreviewBlocks()
+	if #blocks == 0 then notify("Preview", "Load or copy a preview first.", 3); return false end
+
+	local offset = Vector3.new(
+		(tonumber(xBlocks) or 0) * BLOCK_SIZE,
+		(tonumber(yBlocks) or 0) * BLOCK_SIZE,
+		(tonumber(zBlocks) or 0) * BLOCK_SIZE
+	)
+
+	for _, b in ipairs(blocks) do
+		b.CFrame = b.CFrame + offset
+	end
+
+	-- Keep PrimaryPart in sync so future operations still have a reference
 	local primary = ensurePreviewPrimaryPart()
-	if not primary then notify("Preview", "Load or copy a preview first.", 3); return false end
-	cloneFolder:SetPrimaryPartCFrame(primary.CFrame + buildLocalOffset(xBlocks, yBlocks, zBlocks))
+	if primary then cloneFolder.PrimaryPart = primary end
+
 	return true
 end
 
@@ -712,74 +719,104 @@ end
 	so the preview stays grid-aligned after each operation.
 ]]
 
-local function getPreviewCentre()
-	local blocks = getPreviewBlocks()
-	if #blocks == 0 then return nil end
-	local minX, minY, minZ =  math.huge,  math.huge,  math.huge
-	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
-	for _, b in ipairs(blocks) do
-		local p = b.Position
-		if p.X < minX then minX = p.X end
-		if p.Y < minY then minY = p.Y end
-		if p.Z < minZ then minZ = p.Z end
-		if p.X > maxX then maxX = p.X end
-		if p.Y > maxY then maxY = p.Y end
-		if p.Z > maxZ then maxZ = p.Z end
-	end
-	return Vector3.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2)
-end
+-- (centre is computed inline inside applyTransformToPreview)
 
-local function applyTransformToPreview(transformFn)
-	-- transformFn receives a position relative to the pivot (Vector3) and
-	-- returns the new relative position (Vector3).
-	local centre = getPreviewCentre()
-	if not centre then notify("Rotate", "Load a preview first.", 3); return end
+--[[
+	ROTATION FIX:
+	All block positions are multiples of BLOCK_SIZE.  The bounding-box centre
+	may land at a half-block offset when the build has an even number of blocks
+	on an axis (e.g. two blocks at X=0 and X=3 → centre X=1.5).
+
+	Strategy that always keeps blocks on-grid and touching:
+	  1. Express every block as an integer grid-coordinate (pos / BLOCK_SIZE).
+	  2. Compute the centre in grid-coords (may be fractional .5 for even widths).
+	  3. Translate so the grid-coord centre is at the origin.
+	  4. Apply the integer rotation (cos/sin of 90° multiples are exactly 0 or ±1).
+	  5. Translate back and convert to world studs.
+
+	Because we only support 90° steps the rotation matrix entries are integers,
+	so no floating-point drift ever accumulates.  For flips the same logic holds.
+]]
+
+local function applyTransformToPreview(transformGridFn)
+	-- transformGridFn: receives (gx, gy, gz) integer grid coords relative to
+	-- the grid centre, returns (nx, ny, nz) new grid coords (also integers).
 	local blocks = getPreviewBlocks()
+	if #blocks == 0 then notify("Rotate", "Load a preview first.", 3); return end
+
+	-- Collect grid coordinates
+	local gcoords = {}
+	local minGX, minGY, minGZ =  math.huge,  math.huge,  math.huge
+	local maxGX, maxGY, maxGZ = -math.huge, -math.huge, -math.huge
 	for _, b in ipairs(blocks) do
-		local rel       = b.Position - centre
-		local newRel    = transformFn(rel)
-		local snapped   = snapToGrid(centre + newRel)
-		b.CFrame        = CFrame.new(snapped)
+		local gx = math.round(b.Position.X / BLOCK_SIZE)
+		local gy = math.round(b.Position.Y / BLOCK_SIZE)
+		local gz = math.round(b.Position.Z / BLOCK_SIZE)
+		table.insert(gcoords, { block = b, gx = gx, gy = gy, gz = gz })
+		if gx < minGX then minGX = gx end
+		if gy < minGY then minGY = gy end
+		if gz < minGZ then minGZ = gz end
+		if gx > maxGX then maxGX = gx end
+		if gy > maxGY then maxGY = gy end
+		if gz > maxGZ then maxGZ = gz end
 	end
+
+	-- Centre in grid-space (may be .5 for even-width builds — that's fine)
+	local cx = (minGX + maxGX) / 2
+	local cy = (minGY + maxGY) / 2
+	local cz = (minGZ + maxGZ) / 2
+
+	-- Transform each block
+	for _, entry in ipairs(gcoords) do
+		-- relative grid coords (floating for even builds)
+		local rx = entry.gx - cx
+		local ry = entry.gy - cy
+		local rz = entry.gz - cz
+
+		local nx, ny, nz = transformGridFn(rx, ry, rz)
+
+		-- New absolute grid coord, rounded back to integer (handles .5 centres)
+		local newGX = math.round(cx + nx)
+		local newGY = math.round(cy + ny)
+		local newGZ = math.round(cz + nz)
+
+		entry.block.CFrame = CFrame.new(newGX * BLOCK_SIZE, newGY * BLOCK_SIZE, newGZ * BLOCK_SIZE)
+	end
+
 	updatePreviewStatus()
 	updateBlocksStatus()
 end
 
 local function rotatePreviewY(angleDeg)
-	-- Positive angleDeg = clockwise when viewed from above (standard Roblox Y-up).
-	local rad = math.rad(angleDeg)
-	local cos, sin = math.cos(rad), math.sin(rad)
-	applyTransformToPreview(function(rel)
-		return Vector3.new(
-			math.round(cos * rel.X + sin * rel.Z),
-			rel.Y,
-			math.round(-sin * rel.X + cos * rel.Z)
-		)
+	-- For 90° multiples: cos/sin are exactly 0 or ±1 — no float error.
+	local rad       = math.rad(angleDeg)
+	local cosA      = math.round(math.cos(rad))   -- -1, 0, or 1
+	local sinA      = math.round(math.sin(rad))   -- -1, 0, or 1
+
+	applyTransformToPreview(function(rx, ry, rz)
+		-- Standard Y-axis rotation (clockwise = positive angle)
+		return cosA * rx + sinA * rz,
+		       ry,
+		       -sinA * rx + cosA * rz
 	end)
+
 	previewRotationDeg = (previewRotationDeg + angleDeg) % 360
 	updateRotateStatus()
 	notify("Rotate", string.format("Rotated to %d°", previewRotationDeg), 2)
 end
 
 local function flipPreviewX()
-	applyTransformToPreview(function(rel)
-		return Vector3.new(-rel.X, rel.Y, rel.Z)
-	end)
+	applyTransformToPreview(function(rx, ry, rz) return -rx, ry, rz end)
 	notify("Rotate", "Flipped on X axis.", 2)
 end
 
 local function flipPreviewZ()
-	applyTransformToPreview(function(rel)
-		return Vector3.new(rel.X, rel.Y, -rel.Z)
-	end)
+	applyTransformToPreview(function(rx, ry, rz) return rx, ry, -rz end)
 	notify("Rotate", "Flipped on Z axis.", 2)
 end
 
 local function flipPreviewY()
-	-- Flip vertically (mirror across horizontal mid-plane — rare but handy)
-	applyTransformToPreview(function(rel)
-		return Vector3.new(rel.X, -rel.Y, rel.Z)
-	end)
+	applyTransformToPreview(function(rx, ry, rz) return rx, -ry, rz end)
 	notify("Rotate", "Flipped vertically (Y axis).", 2)
 end
 
@@ -1240,6 +1277,20 @@ StorageSection:AddButton({
 		local blocks, err = getSelectionBlocks()
 		if not blocks then notify("Save", tostring(err), 4); return end
 		local data    = buildSchematicData(blocks)
+
+		-- Always embed totem data automatically alongside the block data
+		local totems, totemErr = scanTotems()
+		if totems and #totems > 0 then
+			local totemData = {}
+			for _, t in ipairs(totems) do
+				table.insert(totemData, { name = t.name, upgrades = t.upgrades })
+			end
+			data.TotemData = totemData
+			notify("Save", string.format("Embedded %d totem(s) into save.", #totems), 3)
+		elseif totemErr then
+			notify("Save", "Note: could not embed totem data — " .. tostring(totemErr), 4)
+		end
+
 		local encoded = HttpService:JSONEncode(data)
 		local path    = getSchematicPath(currentFileName)
 		writefile(path, encoded)
@@ -1353,7 +1404,11 @@ PreviewSection:AddButton({
 		for _, b in ipairs(previewBlocks) do table.insert(snapshot, { name = b.Name, cframe = b.CFrame }) end
 		local added = 0
 		for copyIndex = 1, duplicateCount do
-			local offset = buildLocalOffset(duplicateOffsetX * copyIndex, duplicateOffsetY * copyIndex, duplicateOffsetZ * copyIndex)
+			local offset = Vector3.new(
+				duplicateOffsetX * copyIndex * BLOCK_SIZE,
+				duplicateOffsetY * copyIndex * BLOCK_SIZE,
+				duplicateOffsetZ * copyIndex * BLOCK_SIZE
+			)
 			for _, b in ipairs(snapshot) do
 				if spawnPreviewBlock(b.name, b.cframe + offset) then added = added + 1 end
 			end
@@ -1503,6 +1558,8 @@ local function pastePreview()
 			notify("Paste", string.format("Paste stopped after placing %d of %d blocks.", placed, total), 4)
 		else
 			notify("Paste", string.format("Finished placing %d blocks.", placed), 4)
+			-- Auto-upgrade totems to match saved schematic levels (if TotemData present)
+			autoUpgradeFromSchematicTotemData()
 		end
 	end)
 end
@@ -1516,9 +1573,77 @@ PasteSection:AddButton({
 	end
 })
 
--- ═══════════════════════════════════════════════════════════════════════════════
--- UI — Totem Tab: Scanner
--- ═══════════════════════════════════════════════════════════════════════════════
+-- ─── Auto-upgrade from saved schematic TotemData ─────────────────────────────
+--[[
+	After a paste finishes, if the loaded schematic JSON has TotemData embedded,
+	we automatically upgrade each matching totem on the island to the saved level.
+	This fires UpgradeBlock exactly (savedLevel - currentLevel) times per stat.
+]]
+local function autoUpgradeFromSchematicTotemData()
+	local upgradeRemote = netManaged and netManaged:FindFirstChild("UpgradeBlock")
+	if not upgradeRemote then
+		notify("Totems", "UpgradeBlock remote not found — skipping auto-upgrade.", 4)
+		return
+	end
+
+	-- Load the TotemData from the current schematic file
+	local path = getSchematicPath(currentFileName)
+	if not isfile(path) then return end
+
+	local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
+	if not ok or type(decoded) ~= "table" or not decoded.TotemData or #decoded.TotemData == 0 then
+		return  -- No embedded totem data — nothing to do
+	end
+
+	local savedTotemData = decoded.TotemData
+	notify("Totems", string.format("Auto-upgrading %d totem(s) from schematic data…", #savedTotemData), 4)
+	TotemUpgradeStatus:SetDesc("Auto-upgrade from schematic running…")
+
+	task.spawn(function()
+		local totalCalls = 0
+
+		-- Scan live island totems so we have real Instance references
+		local liveTotems, err = scanTotems()
+		if not liveTotems or #liveTotems == 0 then
+			TotemUpgradeStatus:SetDesc("Auto-upgrade: no live totems found.\n" .. tostring(err or ""))
+			return
+		end
+
+		-- Build a lookup from name → live totem entry
+		local liveByName = {}
+		for _, lt in ipairs(liveTotems) do
+			liveByName[lt.name] = lt
+		end
+
+		for _, saved in ipairs(savedTotemData) do
+			local live = liveByName[saved.name]
+			if not live then
+				notify("Totems", "Totem not found on island: " .. tostring(saved.name), 3)
+			else
+				for _, upgradeType in ipairs(TOTEM_UPGRADE_TYPES) do
+					local savedLevel = (saved.upgrades and saved.upgrades[upgradeType]) or 0
+					local liveLevel  = live.upgrades[upgradeType] or 0
+					local needed     = savedLevel - liveLevel
+
+					for i = 1, needed do
+						pcall(function()
+							upgradeRemote:InvokeServer(live.instance, totemUpgradeTarget, upgradeType)
+						end)
+						totalCalls = totalCalls + 1
+						TotemUpgradeStatus:SetDesc(string.format(
+							"Auto-upgrading %s → %s (%s)  %d/%d\nTotal calls: %d",
+							live.name, totemUpgradeTarget, upgradeType, i, needed, totalCalls
+						))
+						task.wait(totemUpgradeDelay)
+					end
+				end
+			end
+		end
+
+		TotemUpgradeStatus:SetDesc(string.format("Auto-upgrade done. Total calls: %d", totalCalls))
+		notify("Totems", string.format("Auto-upgrade finished. %d call(s) fired.", totalCalls), 4)
+	end)
+end
 
 TotemScanSection:AddButton({
 	Title = "Scan Island Totems",
