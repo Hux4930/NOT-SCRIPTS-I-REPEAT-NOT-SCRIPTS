@@ -769,7 +769,7 @@ function StartOreAura()
                         -- ✅ Verify part still exists in workspace
                         if part and part.Parent then
                             local dist = (hrpPos - part.Position).Magnitude
-                            if dist <= 18 then
+                            if dist <= 200 then
                                 ores[#ores + 1] = {
                                     block = block,
                                     part = part,
@@ -806,7 +806,7 @@ function StartOreAura()
                 end
 
                 local dist = (hrp.Position - targetPos).Magnitude
-                local tweenTime = math.clamp(dist / 20, 0.1, 0.5) -- speed scales with distance
+                local tweenTime = dist / 40-- speed scales with distance
 
                 currentTween = TweenService:Create(hrp, TweenInfo.new(tweenTime, Enum.EasingStyle.Linear), {
                     Position = targetPos + Vector3.new(0, 3, 0) -- slight offset so you don't clip into ore
