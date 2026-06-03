@@ -148,6 +148,7 @@ local duplicateOffsetX     = 0
 local duplicateOffsetY     = 0
 local duplicateOffsetZ     = 0
 local pasteInProgress      = false
+local pasteBatchSize       = 20
 
 -- Rotation state (degrees, Y-axis; stored as multiples of 90)
 local previewRotationDeg   = 0   -- 0 / 90 / 180 / 270
@@ -1126,6 +1127,29 @@ local function placeBlockRequest(blockCFrame, blockName)
 	return pcall(function() placeRemote:InvokeServer(args) end)
 end
 
+local function placeBlockBatch(batch)
+	local completed = 0
+	local placed = 0
+	local done = Instance.new("BindableEvent")
+
+	for _, entry in ipairs(batch) do
+		task.spawn(function()
+			local success = false
+			if entry.block and entry.block.Parent then
+				success = placeBlockRequest(entry.block.CFrame, entry.block.Name)
+			end
+			entry.success = success
+			if success then placed = placed + 1 end
+			completed = completed + 1
+			if completed >= #batch then done:Fire() end
+		end)
+	end
+
+	if #batch > 0 then done.Event:Wait() end
+	done:Destroy()
+	return placed
+end
+
 -- ─── Mouse click picking ──────────────────────────────────────────────────────
 
 Mouse.Button1Down:Connect(function()
@@ -1494,6 +1518,17 @@ BlocksSection:AddButton({
 -- UI — Paste
 -- ═══════════════════════════════════════════════════════════════════════════════
 
+PasteSection:AddInput("PasteBatchSize", {
+	Title = "Remotes At Once",
+	Default = "20",
+	Placeholder = "20",
+	Numeric = true,
+	Finished = false,
+	Callback = function(value)
+		pasteBatchSize = math.clamp(math.floor(tonumber(value) or 20), 1, 100)
+	end
+})
+
 local function pastePreview()
 	if pasteInProgress then notify("Paste", "A paste is already running.", 3); return end
 	local previewBlocks = getPreviewBlocks()
@@ -1515,7 +1550,7 @@ local function pastePreview()
 			local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if not humanoidRootPart then task.wait(0.5); continue end
 
-			local didPlace = false
+			local batch = {}
 			for index = #pending, 1, -1 do
 				local previewBlock = pending[index]
 				if not previewBlock or not previewBlock.Parent then
@@ -1523,18 +1558,22 @@ local function pastePreview()
 				else
 					local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
 					if distance <= 90 then
-						local success = placeBlockRequest(previewBlock.CFrame, previewBlock.Name)
-						if success then
-							placed = placed + 1
-							didPlace = true
-							previewBlock:Destroy()
-							table.remove(pending, index)
-						end
+						table.insert(batch, { block = previewBlock, pendingIndex = index })
+						if #batch >= pasteBatchSize then break end
 					end
 				end
 			end
 
-			if didPlace then
+			local batchPlaced = placeBlockBatch(batch)
+			for _, entry in ipairs(batch) do
+				if entry.success then
+					if entry.block and entry.block.Parent then entry.block:Destroy() end
+					table.remove(pending, entry.pendingIndex)
+				end
+			end
+			placed = placed + batchPlaced
+
+			if batchPlaced > 0 then
 				noProgressLoops = 0
 				updatePreviewStatus()
 				updateBlocksStatus()
