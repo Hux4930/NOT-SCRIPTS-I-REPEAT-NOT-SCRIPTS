@@ -23,6 +23,7 @@ local PLACE_CACHE_FILE      = CACHE_FOLDER .. "/block_place_cache.json"
 local TOTEM_STORAGE_FILE    = GAME_FOLDER .. "/totem_storage.json"   -- persistent totem save file
 local REMOTE_DEBUG_FOLDER   = "_ISLANDS_SCHEMATIC_ONLY"
 local PREVIEW_MODEL_NAME    = "IslandsSchematicOnlyPreview"
+local PREVIEW_DRAGGER_NAME  = "IslandsSchematicOnlyPreviewDragger"
 local SELECTION_PART_NAME   = "IslandsSchematicOnlySelection"
 local START_MARKER_NAME     = "IslandsSchematicOnlyStart"
 local END_MARKER_NAME       = "IslandsSchematicOnlyEnd"
@@ -57,6 +58,7 @@ local Window = Fluent:CreateWindow({
 
 local Tabs = {
 	Main   = Window:AddTab({ Title = "Schematic", Icon = "printer" }),
+	Select = Window:AddTab({ Title = "Selection", Icon = "box-select" }),
 	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" })
 }
 
@@ -149,6 +151,17 @@ local duplicateOffsetY     = 0
 local duplicateOffsetZ     = 0
 local pasteInProgress      = false
 local pasteBatchSize       = 20
+local previewLoadYieldEvery = 25
+local pasteStepAction      = nil
+local pasteStepEvent       = Instance.new("BindableEvent")
+local pasteWaitingForStep  = false
+local dragPreviewEnabled   = true
+local previewDragFolder    = Workspace:FindFirstChild(PREVIEW_DRAGGER_NAME)
+local previewDragHandles   = {}
+local previewDragActive    = false
+local previewDragStartHit  = nil
+local previewDragStartCFrames = nil
+local previewDragAxis      = nil
 
 -- Rotation state (degrees, Y-axis; stored as multiples of 90)
 local previewRotationDeg   = 0   -- 0 / 90 / 180 / 270
@@ -175,7 +188,7 @@ local selectionPickMode   = nil
 -- ─── Sections ─────────────────────────────────────────────────────────────────
 
 local RemoteSection    = Tabs.Main:AddSection("Remote")
-local SelectionSection = Tabs.Main:AddSection("Selection")
+local SelectionSection = Tabs.Select:AddSection("Select Region")
 local StorageSection   = Tabs.Main:AddSection("Storage")
 local PreviewSection   = Tabs.Main:AddSection("Preview")
 local RotateSection    = Tabs.Main:AddSection("Rotate & Flip")   -- NEW
@@ -200,12 +213,20 @@ local PreviewStatus = PreviewSection:AddParagraph({
 	Title = "Preview", Content = "0 preview blocks"
 })
 
+local DragStatus = PreviewSection:AddParagraph({
+	Title = "Drag Move", Content = "load a preview, then drag a direction handle"
+})
+
 local RotateStatus = RotateSection:AddParagraph({
 	Title = "Rotation", Content = "0° (no rotation)"
 })
 
 local BlocksStatus = BlocksSection:AddParagraph({
 	Title = "Block Types", Content = "no preview loaded"
+})
+
+local PasteStatus = PasteSection:AddParagraph({
+	Title = "Paste Queue", Content = "idle"
 })
 
 local TotemScanStatus = TotemScanSection:AddParagraph({
@@ -245,16 +266,34 @@ end
 
 -- ─── Totem scanning ───────────────────────────────────────────────────────────
 
-local function scanTotems()
+local function getSelectedPartSet()
+	if not selectionPart then return nil, "Pick a selection region first." end
+	local selected = {}
+	for _, part in ipairs(Workspace:GetPartsInPart(selectionPart)) do
+		selected[part] = true
+		if part.Parent and part.Parent:IsA("BasePart") then
+			selected[part.Parent] = true
+		end
+	end
+	return selected
+end
+
+local function scanTotems(selectedOnly)
 	local island = getLocalIsland()
 	if not island then return nil, "Could not find your island in Workspace.Islands." end
 
 	local blocksContainer = island:FindFirstChild("Blocks")
 	if not blocksContainer then return nil, "Island has no Blocks folder." end
 
+	local selectedParts, selectedErr = nil, nil
+	if selectedOnly then
+		selectedParts, selectedErr = getSelectedPartSet()
+		if not selectedParts then return nil, selectedErr end
+	end
+
 	local totems = {}
 	for _, block in ipairs(blocksContainer:GetChildren()) do
-		if isTotemBlock(block) then
+		if isTotemBlock(block) and (not selectedOnly or selectedParts[block]) then
 			local upgradeProgress = block:FindFirstChild("UpgradeProgress")
 			local upgrades = {}
 			if upgradeProgress then
@@ -323,9 +362,9 @@ local function saveTotemSlot(slotName)
 	slotName = tostring(slotName or "default"):gsub("^%s+", ""):gsub("%s+$", "")
 	if slotName == "" then slotName = "default" end
 
-	local totems, err = scanTotems()
+	local totems, err = scanTotems(true)
 	if not totems then return false, err end
-	if #totems == 0 then return false, "No totem blocks found on your island." end
+	if #totems == 0 then return false, "No totem blocks found inside the selected region." end
 
 	local store = readTotemStore()
 	local totemData = {}
@@ -375,9 +414,9 @@ end
 
 -- Also keep the old schematic-file totem embed (backwards compatible)
 local function saveTotemDataToFile(fileName)
-	local totems, err = scanTotems()
+	local totems, err = scanTotems(true)
 	if not totems then return false, err end
-	if #totems == 0 then return false, "No totem blocks found to save." end
+	if #totems == 0 then return false, "No totem blocks found inside the selected region." end
 
 	local path    = SCHEMATIC_FOLDER .. "/" .. ensureJsonExtension(fileName)
 	local existing = {}
@@ -526,6 +565,9 @@ local function destroySelectionVisuals()
 	if endMarker     then endMarker:Destroy();     endMarker     = nil end
 end
 
+local updatePreviewDragPart
+local getPositionOnlyKey
+
 local function countPreviewBlocks()
 	local count = 0
 	for _, child in ipairs(cloneFolder:GetChildren()) do
@@ -536,6 +578,7 @@ end
 
 local function updatePreviewStatus()
 	PreviewStatus:SetDesc(string.format("%d preview blocks  |  rotation: %d°", countPreviewBlocks(), previewRotationDeg))
+	if updatePreviewDragPart then updatePreviewDragPart() end
 end
 
 local function updateRotateStatus()
@@ -658,7 +701,12 @@ local function isPreviewBlock(block)
 end
 
 local function clearPreview()
-	for _, child in ipairs(cloneFolder:GetChildren()) do child:Destroy() end
+	local removed = 0
+	for _, child in ipairs(cloneFolder:GetChildren()) do
+		child:Destroy()
+		removed = removed + 1
+		if removed % 100 == 0 then task.wait() end
+	end
 	cloneFolder.PrimaryPart = nil
 	previewRotationDeg      = 0
 	updatePreviewStatus()
@@ -672,6 +720,117 @@ local function getPreviewBlocks()
 		if isPreviewBlock(child) then table.insert(blocks, child) end
 	end
 	return blocks
+end
+
+local function refreshPreviewStackKeys()
+	for _, block in ipairs(getPreviewBlocks()) do
+		block:SetAttribute("StackPositionKey", getPositionOnlyKey(block.CFrame.Position))
+	end
+end
+
+local function getPreviewBounds()
+	local blocks = getPreviewBlocks()
+	if #blocks == 0 then return nil end
+	local minX, minY, minZ = math.huge, math.huge, math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	for _, block in ipairs(blocks) do
+		local pos = block.Position
+		if pos.X < minX then minX = pos.X end
+		if pos.Y < minY then minY = pos.Y end
+		if pos.Z < minZ then minZ = pos.Z end
+		if pos.X > maxX then maxX = pos.X end
+		if pos.Y > maxY then maxY = pos.Y end
+		if pos.Z > maxZ then maxZ = pos.Z end
+	end
+	return Vector3.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+		Vector3.new((maxX - minX) + BLOCK_SIZE, (maxY - minY) + BLOCK_SIZE, (maxZ - minZ) + BLOCK_SIZE)
+end
+
+updatePreviewDragPart = function()
+	if previewDragFolder and not previewDragFolder:IsA("Folder") then
+		previewDragFolder:Destroy()
+		previewDragFolder = nil
+		previewDragHandles = {}
+	end
+	if not previewDragFolder then
+		previewDragFolder = Instance.new("Folder")
+		previewDragFolder.Name = PREVIEW_DRAGGER_NAME
+		previewDragFolder.Parent = Workspace
+	end
+	if next(previewDragHandles) == nil then
+		for _, child in ipairs(previewDragFolder:GetChildren()) do
+			child:Destroy()
+		end
+	end
+
+	if not dragPreviewEnabled then
+		for _, handle in pairs(previewDragHandles) do
+			handle.line.Transparency = 1
+			handle.knob.Transparency = 1
+		end
+		DragStatus:SetDesc("off")
+		return
+	end
+
+	local center, size = getPreviewBounds()
+	if not center then
+		for _, handle in pairs(previewDragHandles) do
+			handle.line.Transparency = 1
+			handle.knob.Transparency = 1
+		end
+		DragStatus:SetDesc("load a preview, then drag an arrow handle")
+		return
+	end
+
+	local maxExtent = math.max(size.X, size.Y, size.Z)
+	local handleLength = math.max(BLOCK_SIZE * 4, (maxExtent / 2) + (BLOCK_SIZE * 3))
+	local knobSize = BLOCK_SIZE * 0.8
+	local configs = {
+		Right = { axis = Vector3.new(1, 0, 0), color = Color3.fromRGB(255, 90, 90), lineSize = Vector3.new(handleLength, 0.35, 0.35), angle = CFrame.new() },
+		Left = { axis = Vector3.new(-1, 0, 0), color = Color3.fromRGB(255, 90, 90), lineSize = Vector3.new(handleLength, 0.35, 0.35), angle = CFrame.new() },
+		Up = { axis = Vector3.new(0, 1, 0), color = Color3.fromRGB(90, 255, 120), lineSize = Vector3.new(0.35, handleLength, 0.35), angle = CFrame.new() },
+		Down = { axis = Vector3.new(0, -1, 0), color = Color3.fromRGB(90, 255, 120), lineSize = Vector3.new(0.35, handleLength, 0.35), angle = CFrame.new() },
+		Forward = { axis = Vector3.new(0, 0, 1), color = Color3.fromRGB(90, 170, 255), lineSize = Vector3.new(0.35, 0.35, handleLength), angle = CFrame.new() },
+		Back = { axis = Vector3.new(0, 0, -1), color = Color3.fromRGB(90, 170, 255), lineSize = Vector3.new(0.35, 0.35, handleLength), angle = CFrame.new() },
+	}
+
+	for name, config in pairs(configs) do
+		local handle = previewDragHandles[name]
+		if not handle then
+			local line = Instance.new("Part")
+			line.Name = "DragLine" .. name
+			line.Anchored = true
+			line.CanCollide = false
+			line.CastShadow = false
+			line.Material = Enum.Material.Neon
+			line.Parent = previewDragFolder
+
+			local knob = Instance.new("Part")
+			knob.Name = "DragHandle" .. name
+			knob.Anchored = true
+			knob.CanCollide = false
+			knob.CastShadow = false
+			knob.Material = Enum.Material.ForceField
+			knob.Shape = Enum.PartType.Ball
+			knob.Parent = previewDragFolder
+
+			handle = { line = line, knob = knob, axis = config.axis }
+			previewDragHandles[name] = handle
+		end
+
+		local lineCenter = center + config.axis * (handleLength / 2)
+		local knobCenter = center + config.axis * handleLength
+		handle.axis = config.axis
+		handle.line.Size = config.lineSize
+		handle.line.CFrame = CFrame.new(lineCenter)
+		handle.line.Color = config.color
+		handle.line.Transparency = 0.15
+		handle.knob.Size = Vector3.new(knobSize, knobSize, knobSize)
+		handle.knob.CFrame = CFrame.new(knobCenter)
+		handle.knob.Color = config.color
+		handle.knob.Transparency = 0.2
+	end
+	DragStatus:SetDesc("drag a direction handle; movement snaps every 3 studs")
 end
 
 local function ensurePreviewPrimaryPart()
@@ -706,6 +865,8 @@ local function movePreviewByBlocks(xBlocks, yBlocks, zBlocks)
 	local primary = ensurePreviewPrimaryPart()
 	if primary then cloneFolder.PrimaryPart = primary end
 
+	refreshPreviewStackKeys()
+	updatePreviewStatus()
 	return true
 end
 
@@ -739,7 +900,7 @@ end
 	so no floating-point drift ever accumulates.  For flips the same logic holds.
 ]]
 
-local function applyTransformToPreview(transformGridFn)
+local function applyTransformToPreview(transformGridFn, rotationDelta)
 	-- transformGridFn: receives (gx, gy, gz) integer grid coords relative to
 	-- the grid centre, returns (nx, ny, nz) new grid coords (also integers).
 	local blocks = getPreviewBlocks()
@@ -753,7 +914,7 @@ local function applyTransformToPreview(transformGridFn)
 		local gx = math.round(b.Position.X / BLOCK_SIZE)
 		local gy = math.round(b.Position.Y / BLOCK_SIZE)
 		local gz = math.round(b.Position.Z / BLOCK_SIZE)
-		table.insert(gcoords, { block = b, gx = gx, gy = gy, gz = gz })
+		table.insert(gcoords, { block = b, gx = gx, gy = gy, gz = gz, rotation = b.CFrame - b.Position })
 		if gx < minGX then minGX = gx end
 		if gy < minGY then minGY = gy end
 		if gz < minGZ then minGZ = gz end
@@ -781,11 +942,18 @@ local function applyTransformToPreview(transformGridFn)
 		local newGY = math.round(cy + ny)
 		local newGZ = math.round(cz + nz)
 
-		entry.block.CFrame = CFrame.new(newGX * BLOCK_SIZE, newGY * BLOCK_SIZE, newGZ * BLOCK_SIZE)
+		local newPosition = Vector3.new(newGX * BLOCK_SIZE, newGY * BLOCK_SIZE, newGZ * BLOCK_SIZE)
+		local newRotation = entry.rotation
+		if rotationDelta then
+			newRotation = rotationDelta * newRotation
+		end
+		entry.block.CFrame = CFrame.new(newPosition) * newRotation
 	end
 
+	refreshPreviewStackKeys()
 	updatePreviewStatus()
 	updateBlocksStatus()
+	updatePreviewDragPart()
 end
 
 local function rotatePreviewY(angleDeg)
@@ -799,7 +967,7 @@ local function rotatePreviewY(angleDeg)
 		return cosA * rx + sinA * rz,
 		       ry,
 		       -sinA * rx + cosA * rz
-	end)
+	end, CFrame.Angles(0, rad, 0))
 
 	previewRotationDeg = (previewRotationDeg + angleDeg) % 360
 	updateRotateStatus()
@@ -894,6 +1062,14 @@ local function normalizePlaceBlockName(name)
 	return name
 end
 
+getPositionOnlyKey = function(position)
+	return string.format("%d:%d:%d",
+		math.round(position.X * 1000),
+		math.round(position.Y * 1000),
+		math.round(position.Z * 1000)
+	)
+end
+
 local function spawnPreviewBlock(blockName, worldCFrame)
 	local previewName = normalizePreviewBlockName(blockName)
 	local blockFolder = blocksFolder:FindFirstChild(previewName)
@@ -909,13 +1085,24 @@ local function spawnPreviewBlock(blockName, worldCFrame)
 	previewBlock.Locked            = false
 	previewBlock.Parent            = cloneFolder
 	previewBlock.CFrame            = worldCFrame
+	previewBlock:SetAttribute("StackPositionKey", getPositionOnlyKey(worldCFrame.Position))
 	return previewBlock
 end
 
 local function loadDecodedSchematic(decoded)
 	if not decoded then return false, "No decoded schematic data." end
 	clearPreview()
+	cloneFolder.Parent = nil
 	local placed = 0
+	local processed = 0
+
+	local function markPreviewLoaded()
+		processed = processed + 1
+		if processed % previewLoadYieldEvery == 0 then
+			PreviewStatus:SetDesc(string.format("loading preview... %d block(s)", placed))
+			task.wait()
+		end
+	end
 
 	local decodedBlocks = decoded.Blocks or decoded.blocks
 	if decodedBlocks then
@@ -931,6 +1118,7 @@ local function loadDecodedSchematic(decoded)
 					local relative = CFrame.new(table.unpack(block.C))
 					local world    = originCFrame:ToWorldSpace(relative)
 					if spawnPreviewBlock(blockName, world) then placed = placed + 1 end
+					markPreviewLoaded()
 				end
 			end
 		end
@@ -941,10 +1129,12 @@ local function loadDecodedSchematic(decoded)
 				local y = tonumber(block[2]) or 0
 				local z = tonumber(block[3]) or 0
 				if spawnPreviewBlock(blockName, CFrame.new(x, y, z)) then placed = placed + 1 end
+				markPreviewLoaded()
 			end
 		end
 	end
 
+	cloneFolder.Parent = Workspace
 	updatePreviewStatus()
 	updateBlocksStatus()
 	if placed == 0 then return false, "No preview blocks could be loaded." end
@@ -1127,6 +1317,49 @@ local function placeBlockRequest(blockCFrame, blockName)
 	return pcall(function() placeRemote:InvokeServer(args) end)
 end
 
+local function queueBlockRequestNoWait(blockCFrame, blockName)
+	if not netManaged then return false, "NetManaged could not be found." end
+	if not placementHashName or not placementHashValue then
+		local ok, err = resolvePlacementHash(false)
+		if not ok then return false, err end
+	end
+	local placeRemote = netManaged:FindFirstChild("CLIENT_BLOCK_PLACE_REQUEST")
+	if not placeRemote then return false, "CLIENT_BLOCK_PLACE_REQUEST was not found." end
+
+	local args = {
+		upperBlock = false,
+		cframe = blockCFrame,
+		blockType = normalizePlaceBlockName(blockName)
+	}
+	args[placementHashName] = placementHashValue
+
+	task.spawn(function()
+		pcall(function()
+			placeRemote:InvokeServer(args)
+		end)
+	end)
+	return true
+end
+
+local function buildPlaceArgs(blockCFrame, blockName)
+	local args = {
+		upperBlock = false,
+		cframe = blockCFrame,
+		blockType = normalizePlaceBlockName(blockName)
+	}
+	args[placementHashName] = placementHashValue
+	return args
+end
+
+local function queuePlaceArgsNoWait(placeRemote, args)
+	task.spawn(function()
+		pcall(function()
+			placeRemote:InvokeServer(args)
+		end)
+	end)
+	return true
+end
+
 local function placeBlockBatch(batch)
 	local completed = 0
 	local placed = 0
@@ -1135,8 +1368,14 @@ local function placeBlockBatch(batch)
 	for _, entry in ipairs(batch) do
 		task.spawn(function()
 			local success = false
+			local blockCFrame = entry.cframe
+			local blockName = entry.name
 			if entry.block and entry.block.Parent then
-				success = placeBlockRequest(entry.block.CFrame, entry.block.Name)
+				blockCFrame = entry.block.CFrame
+				blockName = entry.block.Name
+			end
+			if blockCFrame and blockName then
+				success = placeBlockRequest(blockCFrame, blockName)
 			end
 			entry.success = success
 			if success then placed = placed + 1 end
@@ -1150,9 +1389,148 @@ local function placeBlockBatch(batch)
 	return placed
 end
 
+local function placeStackedBlockBatch(stackedBatch)
+	if not netManaged then return 0 end
+	if not placementHashName or not placementHashValue then
+		local ok = resolvePlacementHash(false)
+		if not ok then return 0 end
+	end
+	local placeRemote = netManaged:FindFirstChild("CLIENT_BLOCK_PLACE_REQUEST")
+	if not placeRemote then return 0 end
+
+	local payloads = {}
+	for _, entry in ipairs(stackedBatch) do
+		entry.success = false
+		if entry.cframe and entry.name then
+			table.insert(payloads, { entry = entry, args = buildPlaceArgs(entry.cframe, entry.name) })
+		end
+	end
+
+	local fired = 0
+	for _, payload in ipairs(payloads) do
+		local args = payload.args
+		payload.entry.success = true
+		fired = fired + 1
+		task.spawn(function()
+			pcall(function()
+				placeRemote:InvokeServer(args)
+			end)
+		end)
+	end
+	return fired
+end
+
+local function getGridKey(position)
+	return getPositionOnlyKey(position)
+end
+
+local function buildPasteQueues(previewBlocks)
+	local groups = {}
+	local order = {}
+	for _, block in ipairs(previewBlocks) do
+		local blockCFrame = block.CFrame
+		local key = block:GetAttribute("StackPositionKey") or getGridKey(blockCFrame.Position)
+		if not groups[key] then
+			groups[key] = {}
+			groups[key].gridKey = key
+			table.insert(order, key)
+		end
+		table.insert(groups[key], { block = block, name = block.Name, cframe = blockCFrame, gridKey = key })
+	end
+
+	table.sort(order, function(a, b)
+		local first = groups[a][1].block.Position
+		local second = groups[b][1].block.Position
+		if first.Y ~= second.Y then return first.Y < second.Y end
+		if first.X ~= second.X then return first.X < second.X end
+		return first.Z < second.Z
+	end)
+
+	local normal = {}
+	local stacked = {}
+	for _, key in ipairs(order) do
+		local group = groups[key]
+		if #group == 1 then
+			table.insert(normal, group[1])
+		else
+			group.isStackedCell = true
+			table.insert(stacked, group)
+		end
+	end
+	return normal, stacked
+end
+
+local function countStackedEntries(stackedBatches)
+	local total = 0
+	for _, batch in ipairs(stackedBatches) do
+		total = total + #batch
+	end
+	return total
+end
+
+local function removeSuccessfulPreviewBlocks(batch)
+	for _, entry in ipairs(batch) do
+		if entry.success and entry.block and entry.block.Parent then
+			entry.block:Destroy()
+		end
+	end
+	updatePreviewStatus()
+	updateBlocksStatus()
+end
+
+local function setPasteStatus(text)
+	PasteStatus:SetDesc(tostring(text or "idle"))
+end
+
+local function requestPasteStep(action)
+	if not pasteInProgress or not pasteWaitingForStep then
+		notify("Paste", "No stacked batch is waiting for Next or Redo.", 3)
+		return
+	end
+	pasteStepAction = action
+	pasteStepEvent:Fire()
+end
+
+local function waitForPasteStep()
+	while pasteInProgress do
+		if pasteStepAction then
+			local action = pasteStepAction
+			pasteStepAction = nil
+			pasteWaitingForStep = false
+			return action
+		end
+		pasteStepEvent.Event:Wait()
+	end
+	return "stop"
+end
+
 -- ─── Mouse click picking ──────────────────────────────────────────────────────
 
 Mouse.Button1Down:Connect(function()
+	local clickedHandle = nil
+	if dragPreviewEnabled then
+		for _, handle in pairs(previewDragHandles) do
+			if Mouse.Target == handle.knob or Mouse.Target == handle.line then
+				clickedHandle = handle
+				break
+			end
+		end
+	end
+
+	if clickedHandle then
+		local blocks = getPreviewBlocks()
+		if #blocks == 0 then return end
+		previewDragActive = true
+		previewDragStartHit = Mouse.Hit.Position
+		previewDragStartCFrames = {}
+		previewDragAxis = clickedHandle.axis
+		for _, block in ipairs(blocks) do
+			table.insert(previewDragStartCFrames, { block = block, cframe = block.CFrame })
+		end
+		DragStatus:SetDesc("pulling handle; snap is 3 studs")
+		return
+	end
+
 	if not selectionPickMode then return end
 	local clickedBlock = normalizeClickedBlock(Mouse.Target)
 	if not clickedBlock then notify("Selection", "Click a 3x3 island block.", 3); return end
@@ -1176,6 +1554,31 @@ Mouse.Button1Down:Connect(function()
 	local endPos   = selectionEndPos   or (selectionEndBlock   and selectionEndBlock.Position)
 	if startPos and endPos then rebuildSelectionPart() end
 	updateSelectionStatus()
+end)
+
+Mouse.Move:Connect(function()
+	if not previewDragActive or not previewDragStartHit or not previewDragStartCFrames or not previewDragAxis then return end
+	local hit = Mouse.Hit.Position
+	local rawDelta = hit - previewDragStartHit
+	local snappedStuds = math.round(rawDelta:Dot(previewDragAxis) / BLOCK_SIZE) * BLOCK_SIZE
+	local offset = previewDragAxis * snappedStuds
+	for _, entry in ipairs(previewDragStartCFrames) do
+		if entry.block and entry.block.Parent then
+			entry.block.CFrame = entry.cframe + offset
+		end
+	end
+	updatePreviewDragPart()
+end)
+
+Mouse.Button1Up:Connect(function()
+	if not previewDragActive then return end
+	previewDragActive = false
+	previewDragStartHit = nil
+	previewDragStartCFrames = nil
+	previewDragAxis = nil
+	refreshPreviewStackKeys()
+	updatePreviewStatus()
+	DragStatus:SetDesc("drag complete")
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1260,10 +1663,16 @@ SelectionSection:AddButton({
 		local blocks, err = getSelectionBlocks()
 		if not blocks then notify("Preview", tostring(err), 4); return end
 		clearPreview()
+		cloneFolder.Parent = nil
 		local copied = 0
 		for _, block in ipairs(blocks) do
 			if spawnPreviewBlock(block.Name, block.CFrame) then copied = copied + 1 end
+			if copied % previewLoadYieldEvery == 0 then
+				PreviewStatus:SetDesc(string.format("copying selection... %d block(s)", copied))
+				task.wait()
+			end
 		end
+		cloneFolder.Parent = Workspace
 		updatePreviewStatus()
 		updateBlocksStatus()
 		notify("Preview", string.format("Copied %d blocks into preview.", copied), 4)
@@ -1302,17 +1711,17 @@ StorageSection:AddButton({
 		if not blocks then notify("Save", tostring(err), 4); return end
 		local data    = buildSchematicData(blocks)
 
-		-- Always embed totem data automatically alongside the block data
-		local totems, totemErr = scanTotems()
+		-- Embed only totems inside the selected region.
+		local totems, totemErr = scanTotems(true)
 		if totems and #totems > 0 then
 			local totemData = {}
 			for _, t in ipairs(totems) do
 				table.insert(totemData, { name = t.name, upgrades = t.upgrades })
 			end
 			data.TotemData = totemData
-			notify("Save", string.format("Embedded %d totem(s) into save.", #totems), 3)
+			notify("Save", string.format("Embedded %d selected totem(s) into save.", #totems), 3)
 		elseif totemErr then
-			notify("Save", "Note: could not embed totem data — " .. tostring(totemErr), 4)
+			notify("Save", "Note: no selected totem data embedded - " .. tostring(totemErr), 4)
 		end
 
 		local encoded = HttpService:JSONEncode(data)
@@ -1401,10 +1810,26 @@ BuildCollisionToggle:OnChanged(function(value)
 	for _, block in ipairs(getPreviewBlocks()) do block.CanCollide = buildCollision end
 end)
 
+local DragPreviewToggle = PreviewSection:AddToggle("DragPreviewEnabled", {
+	Title = "Studio Drag Box", Default = true
+})
+DragPreviewToggle:OnChanged(function(value)
+	dragPreviewEnabled = value
+	updatePreviewStatus()
+end)
+
 PreviewSection:AddInput("MoveStepBlocks", {
 	Title = "Move Step (Blocks)", Default = "1", Placeholder = "1",
 	Numeric = true, Finished = false,
 	Callback = function(value) moveStepBlocks = math.max(1, tonumber(value) or 1) end
+})
+
+PreviewSection:AddInput("PreviewLoadYieldEvery", {
+	Title = "Load Chunk Size", Default = "25", Placeholder = "25",
+	Numeric = true, Finished = false,
+	Callback = function(value)
+		previewLoadYieldEvery = math.clamp(math.floor(tonumber(value) or 25), 5, 250)
+	end
 })
 
 PreviewSection:AddButton({ Title = "Move Preview Up",      Description = "", Callback = function() movePreviewByBlocks(0,  moveStepBlocks, 0) end })
@@ -1529,6 +1954,8 @@ PasteSection:AddInput("PasteBatchSize", {
 	end
 })
 
+local autoUpgradeFromSchematicTotemData
+
 local function pastePreview()
 	if pasteInProgress then notify("Paste", "A paste is already running.", 3); return end
 	local previewBlocks = getPreviewBlocks()
@@ -1538,27 +1965,32 @@ local function pastePreview()
 	if not ok then notify("Paste", tostring(err), 5); return end
 
 	pasteInProgress = true
+	pasteStepAction = nil
 
 	task.spawn(function()
-		local pending = {}
-		for _, block in ipairs(previewBlocks) do table.insert(pending, block) end
-		local total          = #pending
+		local normalPending, stackedBatches = buildPasteQueues(previewBlocks)
+		local stackedTotal = countStackedEntries(stackedBatches)
+		local total          = #previewBlocks
 		local placed         = 0
 		local noProgressLoops = 0
 
-		while pasteInProgress and #pending > 0 do
+		setPasteStatus(string.format("normal blocks: %d | stacked cells: %d | stacked remotes: %d", #normalPending, #stackedBatches, stackedTotal))
+
+		while pasteInProgress and #normalPending > 0 do
 			local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if not humanoidRootPart then task.wait(0.5); continue end
 
 			local batch = {}
-			for index = #pending, 1, -1 do
-				local previewBlock = pending[index]
+			for index = #normalPending, 1, -1 do
+				local entry = normalPending[index]
+				local previewBlock = entry.block
 				if not previewBlock or not previewBlock.Parent then
-					table.remove(pending, index)
+					table.remove(normalPending, index)
 				else
 					local distance = (previewBlock.Position - humanoidRootPart.Position).Magnitude
 					if distance <= 90 then
-						table.insert(batch, { block = previewBlock, pendingIndex = index })
+						entry.pendingIndex = index
+						table.insert(batch, entry)
 						if #batch >= pasteBatchSize then break end
 					end
 				end
@@ -1568,7 +2000,7 @@ local function pastePreview()
 			for _, entry in ipairs(batch) do
 				if entry.success then
 					if entry.block and entry.block.Parent then entry.block:Destroy() end
-					table.remove(pending, entry.pendingIndex)
+					table.remove(normalPending, entry.pendingIndex)
 				end
 			end
 			placed = placed + batchPlaced
@@ -1577,6 +2009,7 @@ local function pastePreview()
 				noProgressLoops = 0
 				updatePreviewStatus()
 				updateBlocksStatus()
+				setPasteStatus(string.format("normal placing: %d/%d done", placed, total))
 				task.wait(0.05)
 			else
 				noProgressLoops = noProgressLoops + 1
@@ -1588,14 +2021,84 @@ local function pastePreview()
 			end
 		end
 
+		if pasteInProgress and #stackedBatches > 0 then
+			setPasteStatus("normal blocks done; stacked cells are paused")
+			task.wait(2)
+		end
+
+		for batchIndex, stackedBatch in ipairs(stackedBatches) do
+			if not pasteInProgress then break end
+			local batchPlaced = 0
+			setPasteStatus(string.format(
+				"stacked cell %d/%d (%s) ready; Next spawns %d remote task(s)",
+				batchIndex,
+				#stackedBatches,
+				tostring(stackedBatch.gridKey or "cell"),
+				#stackedBatch
+			))
+			notify("Paste", string.format("Stacked cell %d ready. Press Next to place it.", batchIndex), 4)
+
+			while pasteInProgress do
+				pasteWaitingForStep = true
+				local action = waitForPasteStep()
+				if action == "stop" then break end
+				if action == "redo" then
+					setPasteStatus(string.format(
+						"stacked cell %d/%d (%s) has not fired yet; press Next first",
+						batchIndex,
+						#stackedBatches,
+						tostring(stackedBatch.gridKey or "cell")
+					))
+					continue
+				end
+				batchPlaced = placeStackedBlockBatch(stackedBatch)
+				task.wait()
+				placed = placed + batchPlaced
+				break
+			end
+			if not pasteInProgress then break end
+
+			setPasteStatus(string.format(
+				"stacked cell %d/%d (%s) spawned %d remote task(s); press Next or Redo",
+				batchIndex,
+				#stackedBatches,
+				tostring(stackedBatch.gridKey or "cell"),
+				batchPlaced
+			))
+			notify("Paste", string.format("Stacked cell %d fired. Press Next or Redo.", batchIndex), 4)
+
+			while pasteInProgress do
+				pasteWaitingForStep = true
+				local action = waitForPasteStep()
+				if action == "redo" then
+					batchPlaced = placeStackedBlockBatch(stackedBatch)
+					task.wait()
+					setPasteStatus(string.format(
+						"redid stacked cell %d/%d (%s): spawned %d remote task(s); press Next",
+						batchIndex,
+						#stackedBatches,
+						tostring(stackedBatch.gridKey or "cell"),
+						batchPlaced
+					))
+				else
+					removeSuccessfulPreviewBlocks(stackedBatch)
+					break
+				end
+			end
+		end
+
 		local wasStopped = not pasteInProgress
 		pasteInProgress = false
+		pasteStepAction = nil
+		pasteWaitingForStep = false
 		updatePreviewStatus()
 		updateBlocksStatus()
 
 		if wasStopped then
+			setPasteStatus("stopped")
 			notify("Paste", string.format("Paste stopped after placing %d of %d blocks.", placed, total), 4)
 		else
+			setPasteStatus("done")
 			notify("Paste", string.format("Finished placing %d blocks.", placed), 4)
 			-- Auto-upgrade totems to match saved schematic levels (if TotemData present)
 			autoUpgradeFromSchematicTotemData()
@@ -1605,9 +2108,22 @@ end
 
 PasteSection:AddButton({ Title = "Paste Preview",  Description = "", Callback = function() pastePreview() end })
 PasteSection:AddButton({
+	Title = "Next Stacked Batch",
+	Description = "continue after the current stacked batch looks correct",
+	Callback = function() requestPasteStep("next") end
+})
+PasteSection:AddButton({
+	Title = "Redo Stacked Batch",
+	Description = "try the last stacked batch again before continuing",
+	Callback = function() requestPasteStep("redo") end
+})
+PasteSection:AddButton({
 	Title = "Stop Paste", Description = "",
 	Callback = function()
-		if pasteInProgress then pasteInProgress = false; notify("Paste", "Paste stopped.", 3)
+		if pasteInProgress then
+			pasteInProgress = false
+			pasteStepEvent:Fire()
+			notify("Paste", "Paste stopped.", 3)
 		else notify("Paste", "No paste is running.", 3) end
 	end
 })
@@ -1618,7 +2134,7 @@ PasteSection:AddButton({
 	we automatically upgrade each matching totem on the island to the saved level.
 	This fires UpgradeBlock exactly (savedLevel - currentLevel) times per stat.
 ]]
-local function autoUpgradeFromSchematicTotemData()
+autoUpgradeFromSchematicTotemData = function()
 	local upgradeRemote = netManaged and netManaged:FindFirstChild("UpgradeBlock")
 	if not upgradeRemote then
 		notify("Totems", "UpgradeBlock remote not found — skipping auto-upgrade.", 4)
@@ -1718,7 +2234,7 @@ TotemStorageSection:AddInput("TotemSaveSlotName", {
 
 TotemStorageSection:AddButton({
 	Title = "Save Totems To Slot",
-	Description = "saves current island totem data into the named slot",
+	Description = "saves selected-region totem data into the named slot",
 	Callback = function()
 		local ok, result = saveTotemSlot(totemSaveSlotName)
 		if ok then
@@ -1784,7 +2300,7 @@ TotemStorageSection:AddButton({
 -- Keep schematic-embedded totem save/load for backwards compat
 TotemStorageSection:AddButton({
 	Title = "Embed Totem Data In Schematic File",
-	Description = "appends TotemData into the current schematic JSON",
+	Description = "appends selected-region TotemData into the current schematic JSON",
 	Callback = function()
 		local ok, result = saveTotemDataToFile(currentFileName)
 		if ok then
