@@ -15,6 +15,17 @@
     {
       "name": "dimonds",
       "url": "https://raw.githubusercontent.com/Hux4930/islands-builds/refs/heads/main/dimond%20farm"
-    }
+    },
+    {
+      "name": "pipe up",
+      "url": "https://raw.githubusercontent.com/Hux4930/islands-builds/refs/heads/main/pipe%20up.txt"
+    },
+    {
+      "name": "3way pipe",
+      "url": "https://raw.githubusercontent.com/Hux4930/islands-builds/refs/heads/main/3way%20pipe"
+    },
+    {
+      "name": "up forwards",
+      "url": "https://raw.githubusercontent.com/Hux4930/islands-builds/refs/heads/main/up%20forwards"
   ]
 }
