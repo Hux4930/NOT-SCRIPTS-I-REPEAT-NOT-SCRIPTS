@@ -24,6 +24,8 @@ local SCHEMATIC_FOLDER      = GAME_FOLDER .. "/Schematics"
 local CACHE_FOLDER          = GAME_FOLDER .. "/Cache"
 local PLACE_CACHE_FILE      = CACHE_FOLDER .. "/block_place_cache.json"
 local TOTEM_STORAGE_FILE    = GAME_FOLDER .. "/totem_storage.json"   -- persistent totem save file
+local DEPOSIT_SETTINGS_FILE = GAME_FOLDER .. "/deposit_settings.json"
+local DEPOSIT_RESUME_FILE   = CACHE_FOLDER .. "/deposit_resume.lua"
 local REMOTE_DEBUG_FOLDER   = "_ISLANDS_SCHEMATIC_ONLY"
 local PREVIEW_MODEL_NAME    = "IslandsSchematicOnlyPreview"
 local PREVIEW_DRAGGER_NAME  = "IslandsSchematicOnlyPreviewDragger"
@@ -51,7 +53,7 @@ local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/IJHGIA
 
 local Window = Fluent:CreateWindow({
 	Title    = "Islands Schematic Only",
-	SubTitle = "copy, save, load, move, rotate, duplicate, paste, totems",
+	SubTitle = "build, paste, totems, and persistent inventory deposit",
 	TabWidth = 160,
 	Size     = UDim2.fromOffset(620, 660),
 	Acrylic  = true,
@@ -63,7 +65,8 @@ local Tabs = {
 	Main   = Window:AddTab({ Title = "Schematic", Icon = "printer" }),
 	Builds = Window:AddTab({ Title = "Online Builds", Icon = "library" }),
 	Select = Window:AddTab({ Title = "Selection", Icon = "box-select" }),
-	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" })
+	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" }),
+	Deposit = Window:AddTab({ Title = "Deposit", Icon = "package" })
 }
 
 local Options = Fluent.Options
@@ -3329,6 +3332,442 @@ TotemUpgradeSection:AddButton({
 })
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Inventory deposit
+
+local function setupInventoryDeposit()
+local DepositSettingsSection = Tabs.Deposit:AddSection("Deposit Settings")
+local DepositControlSection = Tabs.Deposit:AddSection("Controls")
+local DepositPersistenceSection = Tabs.Deposit:AddSection("Persistence")
+local DepositChestStatus = DepositSettingsSection:AddParagraph({
+	Title = "Nearest Chest", Content = "searching..."
+})
+local DepositStatus = DepositControlSection:AddParagraph({
+	Title = "Deposit Status", Content = "choose an item"
+})
+
+local depositDefaults = {
+	itemName = "",
+	amount = 1,
+	delay = 0.5,
+	persistent = false,
+	autoStart = false
+}
+
+local function copyDepositDefaults()
+	local result = {}
+	for key, value in pairs(depositDefaults) do result[key] = value end
+	return result
+end
+
+local function loadDepositSettings()
+	local settings = copyDepositDefaults()
+	if not isfile(DEPOSIT_SETTINGS_FILE) then return settings end
+	local ok, decoded = pcall(function()
+		return HttpService:JSONDecode(readfile(DEPOSIT_SETTINGS_FILE))
+	end)
+	if not ok or type(decoded) ~= "table" then return settings end
+	if type(decoded.itemName) == "string" then settings.itemName = decoded.itemName end
+	settings.amount = math.clamp(math.floor(tonumber(decoded.amount) or 1), 1, 1000000)
+	settings.delay = math.clamp(tonumber(decoded.delay) or 0.5, 0.1, 60)
+	settings.persistent = decoded.persistent == true
+	settings.autoStart = decoded.autoStart == true
+	return settings
+end
+
+local depositSettings = loadDepositSettings()
+local depositRunning = false
+local selectedDepositItem = depositSettings.itemName
+local DepositItemDropdown
+local DepositPersistentToggle
+local DepositAutoStartToggle
+local depositTeleportQueued = false
+
+local function saveDepositSettings()
+	writefile(DEPOSIT_SETTINGS_FILE, HttpService:JSONEncode(depositSettings))
+end
+
+local function getDepositQuantity(tool)
+	if not tool then return 0 end
+	for _, name in ipairs({
+		"amount", "Amount", "quantity", "Quantity", "stackSize", "StackSize"
+	}) do
+		local value = tool:GetAttribute(name)
+		if typeof(value) == "number" then return math.max(0, math.floor(value)) end
+	end
+	for _, name in ipairs({
+		"amount", "Amount", "quantity", "Quantity", "stackSize", "StackSize"
+	}) do
+		local object = tool:FindFirstChild(name)
+		if object and (object:IsA("IntValue") or object:IsA("NumberValue")) then
+			return math.max(0, math.floor(object.Value))
+		end
+	end
+	return 1
+end
+
+local function getDepositPosition(instance)
+	if instance:IsA("BasePart") then return instance.Position end
+	if instance:IsA("Model") then return instance:GetPivot().Position end
+	local part = instance:FindFirstChildWhichIsA("BasePart", true)
+	return part and part.Position or nil
+end
+
+local function findNearestDepositChest()
+	local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	local islands = Workspace:FindFirstChild("Islands")
+	if not root or not islands then return nil end
+	local nearest, nearestDistance = nil, math.huge
+	for _, instance in ipairs(islands:GetDescendants()) do
+		if instance.Name == "diamondChestT2" then
+			local position = getDepositPosition(instance)
+			if position then
+				local distance = (root.Position - position).Magnitude
+				if distance < nearestDistance then
+					nearest, nearestDistance = instance, distance
+				end
+			end
+		end
+	end
+	return nearest, nearestDistance
+end
+
+local function refreshDepositChest()
+	local chest, distance = findNearestDepositChest()
+	DepositChestStatus:SetDesc(chest
+		and string.format("%s | %.1f studs away", chest.Name, distance)
+		or "no diamondChestT2 found")
+	return chest
+end
+
+local function getDepositItemNames()
+	local backpack = LocalPlayer:FindFirstChild("Backpack")
+	local names, seen = {}, {}
+	if backpack then
+		for _, child in ipairs(backpack:GetChildren()) do
+			if child:IsA("Tool") and not seen[child.Name] then
+				seen[child.Name] = true
+				table.insert(names, child.Name)
+			end
+		end
+	end
+	if selectedDepositItem ~= "" and not seen[selectedDepositItem] then
+		table.insert(names, selectedDepositItem)
+	end
+	table.sort(names, function(left, right) return left:lower() < right:lower() end)
+	return names
+end
+
+local function findDepositTool()
+	local backpack = LocalPlayer:FindFirstChild("Backpack")
+	if not backpack or selectedDepositItem == "" then return nil end
+	local tool = backpack:FindFirstChild(selectedDepositItem)
+	return tool and tool:IsA("Tool") and tool or nil
+end
+
+local function refreshDepositItems()
+	if not DepositItemDropdown then return end
+	DepositItemDropdown:SetValues(getDepositItemNames())
+	if selectedDepositItem ~= "" then
+		pcall(function() DepositItemDropdown:SetValue(selectedDepositItem) end)
+	end
+end
+
+local function depositInventoryOnce()
+	local tool = findDepositTool()
+	if not tool then
+		return false, selectedDepositItem == ""
+			and "choose an item first"
+			or ("waiting for " .. selectedDepositItem)
+	end
+	local chest = refreshDepositChest()
+	if not chest then return false, "waiting for a nearby diamondChestT2" end
+	local remote = netManaged and netManaged:FindFirstChild("CLIENT_CHEST_TRANSACTION")
+	if not remote or not remote:IsA("RemoteFunction") then
+		return false, "CLIENT_CHEST_TRANSACTION was not found"
+	end
+	local owned = getDepositQuantity(tool)
+	if owned <= 0 then return false, "the selected stack is empty" end
+	local amount = math.min(depositSettings.amount, owned)
+	local ok, result = pcall(function()
+		return remote:InvokeServer({
+			chest = chest,
+			amount = amount,
+			tool = tool,
+			action = "deposit"
+		})
+	end)
+	if not ok then return false, "deposit error: " .. tostring(result) end
+	task.wait(0.05)
+	local replacement = findDepositTool()
+	return true, replacement
+		and string.format(
+			"deposited %d %s | visible amount: %d",
+			amount,
+			selectedDepositItem,
+			getDepositQuantity(replacement)
+		)
+		or string.format("deposited %d %s | stack finished", amount, selectedDepositItem)
+end
+
+local function stopInventoryDeposit(message)
+	depositRunning = false
+	if message then DepositStatus:SetDesc(message) end
+end
+
+local function startInventoryDeposit(singleDeposit)
+	if depositRunning then DepositStatus:SetDesc("auto deposit is already running"); return end
+	if selectedDepositItem == "" then DepositStatus:SetDesc("choose an item first"); return end
+	depositRunning = true
+	DepositStatus:SetDesc(singleDeposit and "depositing once..." or "auto deposit started")
+	task.spawn(function()
+		repeat
+			local success, message = depositInventoryOnce()
+			DepositStatus:SetDesc(message)
+			if singleDeposit then break end
+			if not success and not depositSettings.persistent then break end
+			task.wait(success and depositSettings.delay or 1)
+		until not depositRunning
+		depositRunning = false
+	end)
+end
+
+local depositResumeSource = ([==[
+repeat task.wait() until game:IsLoaded()
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SETTINGS_FILE = %q
+local RESUME_FILE = %q
+if not isfile(SETTINGS_FILE) then return end
+local ok, settings = pcall(function()
+	return HttpService:JSONDecode(readfile(SETTINGS_FILE))
+end)
+if not ok or type(settings) ~= "table"
+	or settings.persistent ~= true or settings.autoStart ~= true
+	or type(settings.itemName) ~= "string" or settings.itemName == "" then
+	return
+end
+local queueFunction = queue_on_teleport
+	or queueonteleport
+	or (syn and syn.queue_on_teleport)
+	or (fluxus and fluxus.queue_on_teleport)
+if type(queueFunction) == "function" then
+	pcall(function()
+		queueFunction(string.format(
+			"repeat task.wait() until game:IsLoaded(); if isfile(%%q) then loadstring(readfile(%%q))() end",
+			RESUME_FILE,
+			RESUME_FILE
+		))
+	end)
+end
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+local remote = ReplicatedStorage
+	:WaitForChild("rbxts_include")
+	:WaitForChild("node_modules")
+	:WaitForChild("@rbxts")
+	:WaitForChild("net")
+	:WaitForChild("out")
+	:WaitForChild("_NetManaged")
+	:WaitForChild("CLIENT_CHEST_TRANSACTION")
+local function quantity(tool)
+	for _, name in ipairs({ "amount", "Amount", "quantity", "Quantity", "stackSize", "StackSize" }) do
+		local value = tool:GetAttribute(name)
+		if typeof(value) == "number" then return math.max(0, math.floor(value)) end
+		local object = tool:FindFirstChild(name)
+		if object and (object:IsA("IntValue") or object:IsA("NumberValue")) then
+			return math.max(0, math.floor(object.Value))
+		end
+	end
+	return 1
+end
+local function position(instance)
+	if instance:IsA("BasePart") then return instance.Position end
+	if instance:IsA("Model") then return instance:GetPivot().Position end
+	local part = instance:FindFirstChildWhichIsA("BasePart", true)
+	return part and part.Position or nil
+end
+local function nearestChest()
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local islands = workspace:FindFirstChild("Islands")
+	if not root or not islands then return nil end
+	local nearest, distance = nil, math.huge
+	for _, instance in ipairs(islands:GetDescendants()) do
+		if instance.Name == "diamondChestT2" then
+			local pos = position(instance)
+			local current = pos and (root.Position - pos).Magnitude
+			if current and current < distance then nearest, distance = instance, current end
+		end
+	end
+	return nearest
+end
+while task.wait(math.clamp(tonumber(settings.delay) or 0.5, 0.1, 60)) do
+	local refreshedOk, refreshed = pcall(function()
+		return HttpService:JSONDecode(readfile(SETTINGS_FILE))
+	end)
+	if not refreshedOk or type(refreshed) ~= "table"
+		or refreshed.persistent ~= true or refreshed.autoStart ~= true then break end
+	settings = refreshed
+	local tool = backpack:FindFirstChild(settings.itemName)
+	local chest = nearestChest()
+	if tool and tool:IsA("Tool") and chest then
+		local owned = quantity(tool)
+		if owned > 0 then
+			pcall(function()
+				remote:InvokeServer({
+					chest = chest,
+					amount = math.min(
+						math.clamp(math.floor(tonumber(settings.amount) or 1), 1, 1000000),
+						owned
+					),
+					tool = tool,
+					action = "deposit"
+				})
+			end)
+		end
+	end
+end
+]==]):format(DEPOSIT_SETTINGS_FILE, DEPOSIT_RESUME_FILE)
+
+writefile(DEPOSIT_RESUME_FILE, depositResumeSource)
+
+local function queueDepositAfterTeleport()
+	if depositTeleportQueued or not depositSettings.persistent or not depositSettings.autoStart then return end
+	local queueFunction = queue_on_teleport
+		or queueonteleport
+		or (syn and syn.queue_on_teleport)
+		or (fluxus and fluxus.queue_on_teleport)
+	if type(queueFunction) ~= "function" then return end
+	depositTeleportQueued = true
+	pcall(function()
+		queueFunction(string.format(
+			"repeat task.wait() until game:IsLoaded(); if isfile(%q) then loadstring(readfile(%q))() end",
+			DEPOSIT_RESUME_FILE,
+			DEPOSIT_RESUME_FILE
+		))
+	end)
+end
+
+DepositItemDropdown = DepositSettingsSection:AddDropdown("DepositItem", {
+	Title = "Item",
+	Description = "saved by name so replacement stacks are found",
+	Values = getDepositItemNames(),
+	Multi = false,
+	Default = selectedDepositItem ~= "" and selectedDepositItem or nil
+})
+DepositItemDropdown:OnChanged(function(value)
+	if type(value) ~= "string" then return end
+	selectedDepositItem = value
+	depositSettings.itemName = value
+	saveDepositSettings()
+	local tool = findDepositTool()
+	DepositStatus:SetDesc(tool
+		and string.format("selected %s | available: %d", value, getDepositQuantity(tool))
+		or ("waiting for " .. value))
+end)
+
+DepositSettingsSection:AddInput("DepositAmount", {
+	Title = "Amount Per Deposit", Default = tostring(depositSettings.amount), Placeholder = "1",
+	Numeric = true, Finished = false,
+	Callback = function(value)
+		depositSettings.amount = math.clamp(math.floor(tonumber(value) or depositSettings.amount), 1, 1000000)
+		saveDepositSettings()
+	end
+})
+
+DepositSettingsSection:AddInput("DepositDelay", {
+	Title = "Delay Between Deposits", Default = tostring(depositSettings.delay), Placeholder = "0.5",
+	Numeric = true, Finished = false,
+	Callback = function(value)
+		depositSettings.delay = math.clamp(tonumber(value) or depositSettings.delay, 0.1, 60)
+		saveDepositSettings()
+	end
+})
+
+DepositControlSection:AddButton({
+	Title = "Deposit Once", Description = "deposits the configured amount one time",
+	Callback = function() startInventoryDeposit(true) end
+})
+DepositControlSection:AddButton({
+	Title = "Start Auto Deposit", Description = "persistent mode waits for new stacks and chests",
+	Callback = function() startInventoryDeposit(false) end
+})
+DepositControlSection:AddButton({
+	Title = "Stop", Description = "",
+	Callback = function() stopInventoryDeposit("stopped") end
+})
+
+DepositPersistentToggle = DepositPersistenceSection:AddToggle("PersistentDeposit", {
+	Title = "Persistent Mode",
+	Description = "keep waiting when the item or chest is temporarily missing",
+	Default = depositSettings.persistent
+})
+DepositPersistentToggle:OnChanged(function(value)
+	depositSettings.persistent = value == true
+	saveDepositSettings()
+	queueDepositAfterTeleport()
+end)
+
+DepositAutoStartToggle = DepositPersistenceSection:AddToggle("DepositAutoStart", {
+	Title = "Resume After Rejoin",
+	Description = "automatically starts this saved profile after teleport",
+	Default = depositSettings.autoStart
+})
+DepositAutoStartToggle:OnChanged(function(value)
+	depositSettings.autoStart = value == true
+	if depositSettings.autoStart and not depositSettings.persistent then
+		depositSettings.persistent = true
+		pcall(function() DepositPersistentToggle:SetValue(true) end)
+	end
+	saveDepositSettings()
+	queueDepositAfterTeleport()
+end)
+
+DepositPersistenceSection:AddButton({
+	Title = "Save Current Profile",
+	Description = "saves item, amount, delay, and persistence toggles",
+	Callback = function()
+		depositSettings.itemName = selectedDepositItem
+		saveDepositSettings()
+		queueDepositAfterTeleport()
+		notify("Deposit", "Deposit profile saved.", 3)
+	end
+})
+
+DepositPersistenceSection:AddButton({
+	Title = "Clear Saved Profile",
+	Description = "stops deposit and resets all saved deposit settings",
+	Callback = function()
+		stopInventoryDeposit("saved profile cleared")
+		depositSettings = copyDepositDefaults()
+		selectedDepositItem = ""
+		saveDepositSettings()
+		pcall(function() DepositPersistentToggle:SetValue(false) end)
+		pcall(function() DepositAutoStartToggle:SetValue(false) end)
+	end
+})
+
+local depositBackpack = LocalPlayer:WaitForChild("Backpack")
+depositBackpack.ChildAdded:Connect(function()
+	task.wait(0.15)
+	refreshDepositItems()
+end)
+depositBackpack.ChildRemoved:Connect(function()
+	task.wait(0.15)
+	refreshDepositItems()
+end)
+
+refreshDepositItems()
+refreshDepositChest()
+queueDepositAfterTeleport()
+if depositSettings.autoStart and selectedDepositItem ~= "" then
+	task.delay(2, function() startInventoryDeposit(false) end)
+end
+
+end
+
+setupInventoryDeposit()
+
 -- Background loops
 -- ═══════════════════════════════════════════════════════════════════════════════
 
@@ -3360,4 +3799,4 @@ task.spawn(function()
 end)
 
 updateRotateStatus()
-notify("Loaded", "Islands schematic + rotate + totem-save script loaded.", 4)
+notify("Loaded", "Islands autobuilder, totems, and persistent deposit loaded.", 4)
