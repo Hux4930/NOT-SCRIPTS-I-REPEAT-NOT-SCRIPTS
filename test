@@ -3334,7 +3334,9 @@ TotemUpgradeSection:AddButton({
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Inventory deposit
 
+local depositSetupStage = "not started"
 local function setupInventoryDeposit()
+depositSetupStage = "creating sections"
 local DepositSettingsSection = Tabs.Deposit:AddSection("Deposit Settings")
 local DepositControlSection = Tabs.Deposit:AddSection("Controls")
 local DepositPersistenceSection = Tabs.Deposit:AddSection("Persistence")
@@ -3531,6 +3533,7 @@ local function startInventoryDeposit(singleDeposit)
 	end)
 end
 
+depositSetupStage = "building resume worker"
 local depositResumeSource = ([==[
 repeat task.wait() until game:IsLoaded()
 local HttpService = game:GetService("HttpService")
@@ -3629,7 +3632,12 @@ while task.wait(math.clamp(tonumber(settings.delay) or 0.5, 0.1, 60)) do
 end
 ]==]):format(DEPOSIT_SETTINGS_FILE, DEPOSIT_RESUME_FILE)
 
-writefile(DEPOSIT_RESUME_FILE, depositResumeSource)
+local resumeWriteOk, resumeWriteError = pcall(function()
+	writefile(DEPOSIT_RESUME_FILE, depositResumeSource)
+end)
+if not resumeWriteOk then
+	warn("[Deposit] Could not save resume worker: " .. tostring(resumeWriteError))
+end
 
 local function queueDepositAfterTeleport()
 	if depositTeleportQueued or not depositSettings.persistent or not depositSettings.autoStart then return end
@@ -3648,6 +3656,7 @@ local function queueDepositAfterTeleport()
 	end)
 end
 
+depositSetupStage = "creating item dropdown"
 DepositItemDropdown = DepositSettingsSection:AddDropdown("DepositItem", {
 	Title = "Item",
 	Description = "saved by name so replacement stacks are found",
@@ -3655,6 +3664,7 @@ DepositItemDropdown = DepositSettingsSection:AddDropdown("DepositItem", {
 	Multi = false,
 	Default = selectedDepositItem ~= "" and selectedDepositItem or nil
 })
+assert(DepositItemDropdown, "Fluent did not create the deposit item dropdown")
 DepositItemDropdown:OnChanged(function(value)
 	if type(value) ~= "string" then return end
 	selectedDepositItem = value
@@ -3666,6 +3676,7 @@ DepositItemDropdown:OnChanged(function(value)
 		or ("waiting for " .. value))
 end)
 
+depositSetupStage = "creating amount input"
 DepositSettingsSection:AddInput("DepositAmount", {
 	Title = "Amount Per Deposit", Default = tostring(depositSettings.amount), Placeholder = "1",
 	Numeric = true, Finished = false,
@@ -3675,6 +3686,7 @@ DepositSettingsSection:AddInput("DepositAmount", {
 	end
 })
 
+depositSetupStage = "creating delay input"
 DepositSettingsSection:AddInput("DepositDelay", {
 	Title = "Delay Between Deposits", Default = tostring(depositSettings.delay), Placeholder = "0.5",
 	Numeric = true, Finished = false,
@@ -3684,6 +3696,7 @@ DepositSettingsSection:AddInput("DepositDelay", {
 	end
 })
 
+depositSetupStage = "creating control buttons"
 DepositControlSection:AddButton({
 	Title = "Deposit Once", Description = "deposits the configured amount one time",
 	Callback = function() startInventoryDeposit(true) end
@@ -3697,6 +3710,7 @@ DepositControlSection:AddButton({
 	Callback = function() stopInventoryDeposit("stopped") end
 })
 
+depositSetupStage = "creating persistence toggle"
 DepositPersistentToggle = DepositPersistenceSection:AddToggle("PersistentDeposit", {
 	Title = "Persistent Mode",
 	Description = "keep waiting when the item or chest is temporarily missing",
@@ -3708,6 +3722,7 @@ DepositPersistentToggle:OnChanged(function(value)
 	queueDepositAfterTeleport()
 end)
 
+depositSetupStage = "creating resume toggle"
 DepositAutoStartToggle = DepositPersistenceSection:AddToggle("DepositAutoStart", {
 	Title = "Resume After Rejoin",
 	Description = "automatically starts this saved profile after teleport",
@@ -3747,6 +3762,7 @@ DepositPersistenceSection:AddButton({
 	end
 })
 
+depositSetupStage = "connecting backpack"
 local depositBackpack = LocalPlayer:WaitForChild("Backpack")
 depositBackpack.ChildAdded:Connect(function()
 	task.wait(0.15)
@@ -3757,7 +3773,7 @@ depositBackpack.ChildRemoved:Connect(function()
 	refreshDepositItems()
 end)
 
-refreshDepositItems()
+depositSetupStage = "initial refresh"
 refreshDepositChest()
 queueDepositAfterTeleport()
 if depositSettings.autoStart and selectedDepositItem ~= "" then
@@ -3766,7 +3782,12 @@ end
 
 end
 
-setupInventoryDeposit()
+local depositSetupOk, depositSetupError = pcall(setupInventoryDeposit)
+if not depositSetupOk then
+	local message = string.format("%s: %s", depositSetupStage, tostring(depositSetupError))
+	warn("[Deposit setup failed] " .. message)
+	notify("Deposit Error", message, 8)
+end
 
 -- Background loops
 -- ═══════════════════════════════════════════════════════════════════════════════
