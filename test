@@ -49,6 +49,15 @@ ensureFolder(GAME_FOLDER)
 ensureFolder(SCHEMATIC_FOLDER)
 ensureFolder(CACHE_FOLDER)
 
+local depositEnvironment = getgenv and getgenv() or _G
+if type(depositEnvironment.IslandsDepositResumeStop) == "function" then
+	pcall(depositEnvironment.IslandsDepositResumeStop)
+end
+depositEnvironment.IslandsDepositResumeDisabled = true
+pcall(function()
+	writefile(DEPOSIT_RESUME_FILE, "return")
+end)
+
 local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/IJHGIAJGIHJASUIJGHIUHIUHSUIAOHJAHOIBNAO/Nekohub/main/Fluent-master/main.lua"))()
 
 local Window = Fluent:CreateWindow({
@@ -65,9 +74,18 @@ local Tabs = {
 	Main   = Window:AddTab({ Title = "Schematic", Icon = "printer" }),
 	Builds = Window:AddTab({ Title = "Online Builds", Icon = "library" }),
 	Select = Window:AddTab({ Title = "Selection", Icon = "box-select" }),
-	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" }),
-	Deposit = Window:AddTab({ Title = "Deposit", Icon = "package" })
+	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" })
 }
+
+local depositTabOk, depositTab = pcall(function()
+	return Window:AddTab({ Title = "Deposit", Icon = "box-select" })
+end)
+if not depositTabOk or not depositTab then
+	depositTabOk, depositTab = pcall(function()
+		return Window:AddTab({ Title = "Deposit" })
+	end)
+end
+Tabs.Deposit = depositTab
 
 local Options = Fluent.Options
 
@@ -3536,6 +3554,10 @@ end
 depositSetupStage = "building resume worker"
 local depositResumeSource = ([==[
 repeat task.wait() until game:IsLoaded()
+local environment = getgenv and getgenv() or _G
+if environment.IslandsDepositResumeDisabled == true then return end
+if type(isfile) ~= "function" or type(readfile) ~= "function" then return end
+if type(loadstring) ~= "function" then return end
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -3565,14 +3587,21 @@ if type(queueFunction) == "function" then
 end
 local player = Players.LocalPlayer
 local backpack = player:WaitForChild("Backpack")
-local remote = ReplicatedStorage
-	:WaitForChild("rbxts_include")
-	:WaitForChild("node_modules")
-	:WaitForChild("@rbxts")
-	:WaitForChild("net")
-	:WaitForChild("out")
-	:WaitForChild("_NetManaged")
-	:WaitForChild("CLIENT_CHEST_TRANSACTION")
+local remoteOk, remote = pcall(function()
+	return ReplicatedStorage
+		:WaitForChild("rbxts_include", 30)
+		:WaitForChild("node_modules", 30)
+		:WaitForChild("@rbxts", 30)
+		:WaitForChild("net", 30)
+		:WaitForChild("out", 30)
+		:WaitForChild("_NetManaged", 30)
+		:WaitForChild("CLIENT_CHEST_TRANSACTION", 30)
+end)
+if not remoteOk or not remote or not remote:IsA("RemoteFunction") then return end
+local running = true
+environment.IslandsDepositResumeStop = function()
+	running = false
+end
 local function quantity(tool)
 	for _, name in ipairs({ "amount", "Amount", "quantity", "Quantity", "stackSize", "StackSize" }) do
 		local value = tool:GetAttribute(name)
@@ -3604,7 +3633,9 @@ local function nearestChest()
 	end
 	return nearest
 end
-while task.wait(math.clamp(tonumber(settings.delay) or 0.5, 0.1, 60)) do
+while running do
+	task.wait(math.clamp(tonumber(settings.delay) or 0.5, 0.1, 60))
+	if environment.IslandsDepositResumeDisabled == true then break end
 	local refreshedOk, refreshed = pcall(function()
 		return HttpService:JSONDecode(readfile(SETTINGS_FILE))
 	end)
@@ -3630,6 +3661,7 @@ while task.wait(math.clamp(tonumber(settings.delay) or 0.5, 0.1, 60)) do
 		end
 	end
 end
+environment.IslandsDepositResumeStop = nil
 ]==]):format(DEPOSIT_SETTINGS_FILE, DEPOSIT_RESUME_FILE)
 
 local resumeWriteOk, resumeWriteError = pcall(function()
