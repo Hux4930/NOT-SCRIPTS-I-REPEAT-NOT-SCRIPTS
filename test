@@ -10,11 +10,14 @@ local Workspace        = game:GetService("Workspace")
 local HttpService      = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui       = game:GetService("StarterGui")
+local LogService       = game:GetService("LogService")
+local RunService       = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local Mouse       = LocalPlayer:GetMouse()
 
 local BLOCK_SIZE            = 3
+HITBOX_MERGE_OVERLAP        = 0.5
 local SCRIPT_FOLDER         = "IslandsSchematicOnly"
 local GAME_FOLDER           = SCRIPT_FOLDER .. "/Islands"
 local SCHEMATIC_FOLDER      = GAME_FOLDER .. "/Schematics"
@@ -58,6 +61,7 @@ local Window = Fluent:CreateWindow({
 
 local Tabs = {
 	Main   = Window:AddTab({ Title = "Schematic", Icon = "printer" }),
+	Builds = Window:AddTab({ Title = "Online Builds", Icon = "library" }),
 	Select = Window:AddTab({ Title = "Selection", Icon = "box-select" }),
 	Totems = Window:AddTab({ Title = "Totems",    Icon = "zap" })
 }
@@ -151,10 +155,15 @@ local duplicateOffsetY     = 0
 local duplicateOffsetZ     = 0
 local pasteInProgress      = false
 local pasteBatchSize       = 20
+local freezeRenderingDuringPaste = false
+local pasteRenderPauseId   = 0
 local previewLoadYieldEvery = 25
 local pasteStepAction      = nil
 local pasteStepEvent       = Instance.new("BindableEvent")
 local pasteWaitingForStep  = false
+local consoleCommandMode   = false
+local lastConsoleCommand   = nil
+local lastConsoleCommandAt = 0
 local dragPreviewEnabled   = true
 local previewDragFolder    = Workspace:FindFirstChild(PREVIEW_DRAGGER_NAME)
 local previewDragHandles   = {}
@@ -194,6 +203,12 @@ local PreviewSection   = Tabs.Main:AddSection("Preview")
 local RotateSection    = Tabs.Main:AddSection("Rotate & Flip")   -- NEW
 local BlocksSection    = Tabs.Main:AddSection("Blocks In Build")
 local PasteSection     = Tabs.Main:AddSection("Paste")
+local OnlineBuilds = {
+	URL = "https://raw.githubusercontent.com/Hux4930/NOT-SCRIPTS-I-REPEAT-NOT-SCRIPTS/refs/heads/main/builds",
+	ViewerName = "IslandsRemoteBuildViewer",
+	Entries = {}
+}
+OnlineBuilds.Section = Tabs.Builds:AddSection("GitHub Build Library")
 
 local TotemScanSection    = Tabs.Totems:AddSection("Totem Scanner")
 local TotemStorageSection = Tabs.Totems:AddSection("Totem Save / Load")
@@ -227,6 +242,10 @@ local BlocksStatus = BlocksSection:AddParagraph({
 
 local PasteStatus = PasteSection:AddParagraph({
 	Title = "Paste Queue", Content = "idle"
+})
+
+OnlineBuilds.Status = OnlineBuilds.Section:AddParagraph({
+	Title = "Online Builds", Content = "press Refresh Online Builds"
 })
 
 local TotemScanStatus = TotemScanSection:AddParagraph({
@@ -728,22 +747,59 @@ local function refreshPreviewStackKeys()
 	end
 end
 
+local function getPartAabb(part)
+	local half = part.Size / 2
+	local corners = {
+		Vector3.new(-half.X, -half.Y, -half.Z),
+		Vector3.new(-half.X, -half.Y,  half.Z),
+		Vector3.new(-half.X,  half.Y, -half.Z),
+		Vector3.new(-half.X,  half.Y,  half.Z),
+		Vector3.new( half.X, -half.Y, -half.Z),
+		Vector3.new( half.X, -half.Y,  half.Z),
+		Vector3.new( half.X,  half.Y, -half.Z),
+		Vector3.new( half.X,  half.Y,  half.Z)
+	}
+
+	local minX, minY, minZ = math.huge, math.huge, math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	for _, corner in ipairs(corners) do
+		local point = part.CFrame:PointToWorldSpace(corner)
+		if point.X < minX then minX = point.X end
+		if point.Y < minY then minY = point.Y end
+		if point.Z < minZ then minZ = point.Z end
+		if point.X > maxX then maxX = point.X end
+		if point.Y > maxY then maxY = point.Y end
+		if point.Z > maxZ then maxZ = point.Z end
+	end
+	return Vector3.new(minX, minY, minZ), Vector3.new(maxX, maxY, maxZ)
+end
+
 local function getPreviewBounds()
 	local blocks = getPreviewBlocks()
 	if #blocks == 0 then return nil end
 	local minX, minY, minZ = math.huge, math.huge, math.huge
 	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+
+	local function includePart(part)
+		local partMin, partMax = getPartAabb(part)
+		if partMin.X < minX then minX = partMin.X end
+		if partMin.Y < minY then minY = partMin.Y end
+		if partMin.Z < minZ then minZ = partMin.Z end
+		if partMax.X > maxX then maxX = partMax.X end
+		if partMax.Y > maxY then maxY = partMax.Y end
+		if partMax.Z > maxZ then maxZ = partMax.Z end
+	end
+
 	for _, block in ipairs(blocks) do
-		local pos = block.Position
-		if pos.X < minX then minX = pos.X end
-		if pos.Y < minY then minY = pos.Y end
-		if pos.Z < minZ then minZ = pos.Z end
-		if pos.X > maxX then maxX = pos.X end
-		if pos.Y > maxY then maxY = pos.Y end
-		if pos.Z > maxZ then maxZ = pos.Z end
+		includePart(block)
+		for _, child in ipairs(block:GetChildren()) do
+			if child:IsA("BasePart") and child:GetAttribute("IsPreviewHitbox") == true then
+				includePart(child)
+			end
+		end
 	end
 	return Vector3.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
-		Vector3.new((maxX - minX) + BLOCK_SIZE, (maxY - minY) + BLOCK_SIZE, (maxZ - minZ) + BLOCK_SIZE)
+		Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
 end
 
 updatePreviewDragPart = function()
@@ -994,8 +1050,45 @@ end
 local function getSelectionBlocks()
 	if not selectionPart then return nil, "Pick a start and end block first." end
 	local blocks = {}
-	for _, part in pairs(Workspace:GetPartsInPart(selectionPart)) do
-		if part.Parent and part.Parent.Name == "Blocks" then table.insert(blocks, part) end
+	local island = getLocalIsland()
+	local blocksContainer = island and island:FindFirstChild("Blocks")
+	if not blocksContainer then return nil, "Could not find your island Blocks folder." end
+
+	local center = selectionPart.Position
+	local half = selectionPart.Size / 2
+	local minPos = center - half - Vector3.new(0.01, 0.01, 0.01)
+	local maxPos = center + half + Vector3.new(0.01, 0.01, 0.01)
+	local seen = {}
+
+	local function getBlockPart(block)
+		if block:IsA("BasePart") then return block end
+		if block:IsA("Model") then
+			if block.PrimaryPart then return block.PrimaryPart end
+			local root = block:FindFirstChild("Root")
+			if root and root:IsA("BasePart") then return root end
+		end
+		return block:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	for _, block in ipairs(blocksContainer:GetChildren()) do
+		local part = getBlockPart(block)
+		if part then
+			local pos = part.Position
+			if pos.X >= minPos.X and pos.X <= maxPos.X
+				and pos.Y >= minPos.Y and pos.Y <= maxPos.Y
+				and pos.Z >= minPos.Z and pos.Z <= maxPos.Z
+				and not seen[block]
+			then
+				seen[block] = true
+				table.insert(blocks, {
+					Name = block.Name,
+					Position = pos,
+					CFrame = part.CFrame,
+					Instance = block,
+					Part = part
+				})
+			end
+		end
 	end
 	if #blocks == 0 then return nil, "No island blocks were found inside the selection." end
 	return blocks
@@ -1062,6 +1155,72 @@ local function normalizePlaceBlockName(name)
 	return name
 end
 
+function setPartQueryFlags(part, canQuery, canTouch)
+	pcall(function() part.CanQuery = canQuery end)
+	pcall(function() part.CanTouch = canTouch end)
+end
+
+function getCollisionBoxParts(blockFolder)
+	local collisionFolder = blockFolder and blockFolder:FindFirstChild("CollisionBoxes")
+	if not collisionFolder then return {} end
+
+	local parts = {}
+	for _, child in ipairs(collisionFolder:GetDescendants()) do
+		if child:IsA("BasePart") then
+			table.insert(parts, child)
+		end
+	end
+	return parts
+end
+
+function syncPreviewBlockCollision(previewBlock)
+	if not previewBlock or not previewBlock:IsA("BasePart") then return end
+	local hasHitboxes = previewBlock:GetAttribute("HasPreviewHitboxes") == true
+	previewBlock.CanCollide = buildCollision and not hasHitboxes
+
+	for _, child in ipairs(previewBlock:GetChildren()) do
+		if child:IsA("BasePart") and child:GetAttribute("IsPreviewHitbox") == true then
+			child.CanCollide = buildCollision
+			setPartQueryFlags(child, true, buildCollision)
+		end
+	end
+end
+
+function attachPreviewCollisionBoxes(previewBlock, blockFolder, root, worldCFrame)
+	local collisionParts = getCollisionBoxParts(blockFolder)
+	if #collisionParts == 0 then return false end
+
+	for _, sourceBox in ipairs(collisionParts) do
+		local relative = root.CFrame:ToObjectSpace(sourceBox.CFrame)
+		local hitbox = sourceBox:Clone()
+		for _, descendant in ipairs(hitbox:GetDescendants()) do
+			if descendant:IsA("WeldConstraint") or descendant:IsA("JointInstance") then
+				descendant:Destroy()
+			end
+		end
+		hitbox.Name = "Hitbox_" .. tostring(sourceBox.Name)
+		hitbox.Anchored = false
+		hitbox.Massless = true
+		hitbox.Locked = false
+		hitbox.CastShadow = false
+		hitbox.Material = Enum.Material.ForceField
+		hitbox.Color = Color3.fromRGB(255, 215, 90)
+		hitbox.Transparency = math.max(0.35, math.min(0.85, hitbox.Transparency))
+		hitbox.CFrame = worldCFrame:ToWorldSpace(relative)
+		hitbox.Parent = previewBlock
+		hitbox:SetAttribute("IsPreviewHitbox", true)
+		setPartQueryFlags(hitbox, true, buildCollision)
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = previewBlock
+		weld.Part1 = hitbox
+		weld.Parent = hitbox
+	end
+
+	previewBlock:SetAttribute("HasPreviewHitboxes", true)
+	return true
+end
+
 getPositionOnlyKey = function(position)
 	return string.format("%d:%d:%d",
 		math.round(position.X * 1000),
@@ -1086,6 +1245,8 @@ local function spawnPreviewBlock(blockName, worldCFrame)
 	previewBlock.Parent            = cloneFolder
 	previewBlock.CFrame            = worldCFrame
 	previewBlock:SetAttribute("StackPositionKey", getPositionOnlyKey(worldCFrame.Position))
+	attachPreviewCollisionBoxes(previewBlock, blockFolder, root, worldCFrame)
+	syncPreviewBlockCollision(previewBlock)
 	return previewBlock
 end
 
@@ -1146,6 +1307,407 @@ local function loadSchematicText(text)
 	if not decoded then return false, cleanedOrError end
 	lastSavedJson = cleanedOrError
 	return loadDecodedSchematic(decoded)
+end
+
+function OnlineBuilds.GetGuiParent()
+	local ok, hiddenGui = pcall(function()
+		if type(gethui) == "function" then return gethui() end
+	end)
+	if ok and hiddenGui then return hiddenGui end
+
+	local coreGui = game:GetService("CoreGui")
+	local canUseCoreGui = pcall(function()
+		local probe = Instance.new("Folder")
+		probe.Parent = coreGui
+		probe:Destroy()
+	end)
+	if canUseCoreGui then return coreGui end
+	return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+function OnlineBuilds.GetNames()
+	local names = {}
+	for name in pairs(OnlineBuilds.Entries) do table.insert(names, name) end
+	table.sort(names, function(a, b) return a:lower() < b:lower() end)
+	return names
+end
+
+function OnlineBuilds.NormalizeEntry(name, value)
+	if type(value) == "table" and (value.Blocks or value.blocks) then
+		return { name = tostring(name), data = value }
+	end
+	if type(value) == "string" then
+		return { name = tostring(name), url = value }
+	end
+	if type(value) ~= "table" then return nil end
+
+	local entryName = tostring(value.name or value.Name or value.title or value.Title or name)
+	local entryData = value.data or value.Data or value.schematic or value.Schematic
+	local entryUrl = value.url or value.URL or value.raw or value.Raw
+	if type(entryData) == "table" and (entryData.Blocks or entryData.blocks) then
+		return { name = entryName, data = entryData }
+	end
+	if type(entryUrl) == "string" and entryUrl ~= "" then
+		return { name = entryName, url = entryUrl }
+	end
+	return nil
+end
+
+function OnlineBuilds.ParseManifest(text)
+	local decoded, decodeError = decodeSchematicText(text)
+	if not decoded then
+		local entries = {}
+		for line in tostring(text):gmatch("[^\r\n]+") do
+			local name, url = line:match("^%s*([^|]+)%s*|%s*(https?://%S+)%s*$")
+			if name and url then entries[name] = { name = name, url = url } end
+		end
+		if next(entries) then return entries end
+		return nil, "The builds file is not valid JSON: " .. tostring(decodeError)
+	end
+
+	if decoded.Blocks or decoded.blocks then
+		local name = decoded.Name or decoded.name
+			or (decoded.Metadata and (decoded.Metadata.Name or decoded.Metadata.name))
+			or "Remote Build"
+		return { [tostring(name)] = { name = tostring(name), data = decoded } }
+	end
+
+	local source = decoded.builds or decoded.Builds or decoded
+	local entries = {}
+	if #source > 0 then
+		for index, value in ipairs(source) do
+			local fallbackName = "Build " .. tostring(index)
+			local entry = OnlineBuilds.NormalizeEntry(fallbackName, value)
+			if entry then entries[entry.name] = entry end
+		end
+	else
+		for name, value in pairs(source) do
+			local entry = OnlineBuilds.NormalizeEntry(name, value)
+			if entry then entries[entry.name] = entry end
+		end
+	end
+
+	if not next(entries) then
+		return nil, "The builds manifest contains no usable build entries."
+	end
+	return entries
+end
+
+function OnlineBuilds.Refresh()
+	OnlineBuilds.Status:SetDesc("downloading build list...")
+	local ok, response = pcall(function() return game:HttpGet(OnlineBuilds.URL, true) end)
+	if not ok then
+		OnlineBuilds.Status:SetDesc("download failed")
+		return false, tostring(response)
+	end
+
+	local entries, parseError = OnlineBuilds.ParseManifest(response)
+	if not entries then
+		OnlineBuilds.Entries = {}
+		if OnlineBuilds.Dropdown then OnlineBuilds.Dropdown:SetValues({}) end
+		OnlineBuilds.Status:SetDesc(tostring(parseError))
+		return false, parseError
+	end
+
+	OnlineBuilds.Entries = entries
+	local names = OnlineBuilds.GetNames()
+	OnlineBuilds.Selected = names[1]
+	if OnlineBuilds.Dropdown then
+		OnlineBuilds.Dropdown:SetValues(names)
+		pcall(function() OnlineBuilds.Dropdown:SetValue(OnlineBuilds.Selected) end)
+	end
+	OnlineBuilds.Status:SetDesc(string.format("%d build(s) available", #names))
+	return true, #names
+end
+
+function OnlineBuilds.ResolveData(entry)
+	if not entry then return nil, "Select an online build first." end
+	if entry.data then return entry.data end
+	if type(entry.url) ~= "string" or entry.url == "" then
+		return nil, "This build has no data or URL."
+	end
+
+	local url = entry.url
+	if not url:match("^https?://") then
+		url = "https://raw.githubusercontent.com/Hux4930/NOT-SCRIPTS-I-REPEAT-NOT-SCRIPTS/refs/heads/main/"
+			.. url:gsub("^/+", "")
+	end
+	url = url:gsub(" ", "%%20")
+	local ok, response = pcall(function() return game:HttpGet(url, true) end)
+	if not ok then return nil, tostring(response) end
+	local decoded, decodeError = decodeSchematicText(response)
+	if not decoded then return nil, decodeError end
+	entry.data = decoded
+	return decoded
+end
+
+function OnlineBuilds.PrepareClone(instance)
+	local clone = instance:Clone()
+	for _, descendant in ipairs(clone:GetDescendants()) do
+		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+	if clone:IsA("BasePart") then
+		clone.Anchored = true
+		clone.CanCollide = false
+		clone.CanTouch = false
+		clone.CanQuery = false
+	end
+	return clone
+end
+
+function OnlineBuilds.FindTemplate(blockName)
+	local buildDisplayFolder = ReplicatedStorage:FindFirstChild("Blocks")
+	if not buildDisplayFolder then return nil end
+	local normalized = normalizePreviewBlockName(blockName)
+	return buildDisplayFolder:FindFirstChild(normalized)
+		or buildDisplayFolder:FindFirstChild(blockName)
+end
+
+function OnlineBuilds.AddTemplate(displayModel, blockName, worldCFrame)
+	local template = OnlineBuilds.FindTemplate(blockName)
+	if not template then return false end
+
+	if template:IsA("Model") then
+		local clone = OnlineBuilds.PrepareClone(template)
+		clone.Parent = displayModel
+		clone:PivotTo(worldCFrame)
+		return true
+	end
+	if template:IsA("BasePart") then
+		local clone = OnlineBuilds.PrepareClone(template)
+		clone.CFrame = worldCFrame
+		clone.Parent = displayModel
+		return true
+	end
+
+	local root = template:FindFirstChild("Root", true)
+	if root and root:IsA("BasePart") then
+		local clone = OnlineBuilds.PrepareClone(root)
+		clone.Name = blockName
+		clone.CFrame = worldCFrame
+		clone.Parent = displayModel
+		return true
+	end
+	return false
+end
+
+function OnlineBuilds.OpenViewer(buildName, decoded)
+	if not ReplicatedStorage:FindFirstChild("Blocks") then
+		return false, "ReplicatedStorage.Blocks was not found."
+	end
+
+	if OnlineBuilds.ViewerGui then OnlineBuilds.ViewerGui:Destroy() end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = OnlineBuilds.ViewerName
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.Parent = OnlineBuilds.GetGuiParent()
+	OnlineBuilds.ViewerGui = screenGui
+
+	local viewerConnections = {}
+	local viewerCleaned = false
+	local function cleanupViewerConnections()
+		if viewerCleaned then return end
+		viewerCleaned = true
+		for _, connection in ipairs(viewerConnections) do connection:Disconnect() end
+		table.clear(viewerConnections)
+	end
+	screenGui.AncestryChanged:Connect(function(_, parent)
+		if not parent then cleanupViewerConnections() end
+	end)
+
+	local frame = Instance.new("Frame")
+	frame.Name = "Window"
+	frame.Size = UDim2.fromOffset(700, 500)
+	frame.Position = UDim2.new(0.5, -350, 0.5, -250)
+	frame.BackgroundColor3 = Color3.fromRGB(22, 24, 30)
+	frame.BorderSizePixel = 0
+	frame.Active = true
+	frame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = frame
+
+	local header = Instance.new("TextLabel")
+	header.Size = UDim2.new(1, -48, 0, 42)
+	header.BackgroundColor3 = Color3.fromRGB(34, 37, 46)
+	header.BorderSizePixel = 0
+	header.Font = Enum.Font.GothamSemibold
+	header.Text = "  " .. tostring(buildName) .. " - drag to orbit, wheel to zoom"
+	header.TextColor3 = Color3.fromRGB(235, 238, 245)
+	header.TextSize = 15
+	header.TextXAlignment = Enum.TextXAlignment.Left
+	header.Active = true
+	header.Parent = frame
+
+	local close = Instance.new("TextButton")
+	close.Size = UDim2.fromOffset(42, 42)
+	close.Position = UDim2.new(1, -42, 0, 0)
+	close.BackgroundColor3 = Color3.fromRGB(145, 52, 62)
+	close.BorderSizePixel = 0
+	close.Font = Enum.Font.GothamBold
+	close.Text = "X"
+	close.TextColor3 = Color3.new(1, 1, 1)
+	close.TextSize = 15
+	close.Parent = frame
+
+	local viewport = Instance.new("ViewportFrame")
+	viewport.Size = UDim2.new(1, -16, 1, -58)
+	viewport.Position = UDim2.fromOffset(8, 50)
+	viewport.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
+	viewport.BorderSizePixel = 0
+	viewport.Ambient = Color3.fromRGB(165, 165, 175)
+	viewport.LightColor = Color3.fromRGB(255, 244, 225)
+	viewport.LightDirection = Vector3.new(-1, -1, -1)
+	viewport.Active = true
+	viewport.Parent = frame
+
+	local viewportCorner = Instance.new("UICorner")
+	viewportCorner.CornerRadius = UDim.new(0, 6)
+	viewportCorner.Parent = viewport
+
+	local camera = Instance.new("Camera")
+	camera.FieldOfView = 55
+	camera.Parent = viewport
+	viewport.CurrentCamera = camera
+
+	local world = Instance.new("WorldModel")
+	world.Parent = viewport
+	local displayModel = Instance.new("Model")
+	displayModel.Name = "RemoteBuild"
+	displayModel.Parent = world
+
+	local decodedBlocks = decoded.Blocks or decoded.blocks
+	if type(decodedBlocks) ~= "table" then
+		screenGui:Destroy()
+		OnlineBuilds.ViewerGui = nil
+		return false, "The selected build has no Blocks table."
+	end
+
+	local origin = decoded.Origin or decoded.origin or { 0, 0, 0 }
+	local originCFrame = CFrame.new(
+		tonumber(origin[1]) or 0,
+		tonumber(origin[2]) or 0,
+		tonumber(origin[3]) or 0
+	)
+	local shown, missing = 0, {}
+	for blockName, blockList in pairs(decodedBlocks) do
+		for _, block in ipairs(blockList) do
+			if block.C then
+				local worldCFrame = originCFrame:ToWorldSpace(CFrame.new(table.unpack(block.C)))
+				if OnlineBuilds.AddTemplate(displayModel, blockName, worldCFrame) then
+					shown = shown + 1
+				else
+					missing[blockName] = true
+				end
+			end
+		end
+	end
+
+	if shown == 0 then
+		screenGui:Destroy()
+		OnlineBuilds.ViewerGui = nil
+		return false, "No blocks could be displayed from ReplicatedStorage.Blocks."
+	end
+
+	local boundsCFrame, boundsSize = displayModel:GetBoundingBox()
+	displayModel:PivotTo(CFrame.new(-boundsCFrame.Position) * displayModel:GetPivot())
+	local target = Vector3.zero
+	local radius = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z, 6) * 1.35
+	local yaw, pitch = math.rad(40), math.rad(22)
+
+	local function updateCamera()
+		pitch = math.clamp(pitch, math.rad(-80), math.rad(80))
+		radius = math.clamp(radius, 3, 2000)
+		local offset = Vector3.new(
+			math.cos(pitch) * math.sin(yaw),
+			math.sin(pitch),
+			math.cos(pitch) * math.cos(yaw)
+		) * radius
+		camera.CFrame = CFrame.lookAt(target + offset, target)
+	end
+	updateCamera()
+
+	local draggingView = false
+	local lastMousePosition = nil
+	viewport.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.MouseButton2 then
+			draggingView = true
+			lastMousePosition = input.Position
+		end
+	end)
+	viewport.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.MouseButton2 then
+			draggingView = false
+			lastMousePosition = nil
+		end
+	end)
+	table.insert(viewerConnections, UserInputService.InputChanged:Connect(function(input)
+		if not screenGui.Parent then return end
+		if draggingView and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local current = input.Position
+			if lastMousePosition then
+				local delta = current - lastMousePosition
+				yaw = yaw - delta.X * 0.01
+				pitch = pitch + delta.Y * 0.01
+				updateCamera()
+			end
+			lastMousePosition = current
+		elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+			local mouse = UserInputService:GetMouseLocation()
+			local pos, size = viewport.AbsolutePosition, viewport.AbsoluteSize
+			if mouse.X >= pos.X and mouse.X <= pos.X + size.X
+				and mouse.Y >= pos.Y and mouse.Y <= pos.Y + size.Y then
+				radius = radius * (input.Position.Z > 0 and 0.88 or 1.14)
+				updateCamera()
+			end
+		end
+	end))
+
+	local draggingWindow = false
+	local dragStart, frameStart
+	header.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			draggingWindow = true
+			dragStart = input.Position
+			frameStart = frame.Position
+		end
+	end)
+	header.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingWindow = false end
+	end)
+	table.insert(viewerConnections, UserInputService.InputChanged:Connect(function(input)
+		if not screenGui.Parent then return end
+		if draggingWindow and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(
+				frameStart.X.Scale,
+				frameStart.X.Offset + delta.X,
+				frameStart.Y.Scale,
+				frameStart.Y.Offset + delta.Y
+			)
+		end
+	end))
+
+	close.MouseButton1Click:Connect(function()
+		screenGui:Destroy()
+		if OnlineBuilds.ViewerGui == screenGui then OnlineBuilds.ViewerGui = nil end
+	end)
+
+	local missingCount = 0
+	for _ in pairs(missing) do missingCount = missingCount + 1 end
+	return true, shown, missingCount
 end
 
 local function getSchematicPath(fileName)
@@ -1360,10 +1922,45 @@ local function queuePlaceArgsNoWait(placeRemote, args)
 	return true
 end
 
+local function runWithPasteRenderingPaused(callback)
+	local renderingPaused = false
+	local pauseId = nil
+	if freezeRenderingDuringPaste then
+		pasteRenderPauseId = pasteRenderPauseId + 1
+		pauseId = pasteRenderPauseId
+		renderingPaused = pcall(function()
+			RunService:Set3dRenderingEnabled(false)
+		end)
+		if renderingPaused then
+			task.delay(15, function()
+				if pasteRenderPauseId == pauseId then
+					pcall(function()
+						RunService:Set3dRenderingEnabled(true)
+					end)
+				end
+			end)
+		end
+	end
+
+	local ok, result = pcall(callback)
+
+	if renderingPaused then
+		pasteRenderPauseId = pasteRenderPauseId + 1
+		pcall(function()
+			RunService:Set3dRenderingEnabled(true)
+		end)
+	end
+
+	if not ok then
+		warn("[Auto Builder] Remote burst failed: " .. tostring(result))
+		return 0
+	end
+	return result
+end
+
 local function placeBlockBatch(batch)
 	local completed = 0
 	local placed = 0
-	local done = Instance.new("BindableEvent")
 
 	for _, entry in ipairs(batch) do
 		task.spawn(function()
@@ -1380,16 +1977,14 @@ local function placeBlockBatch(batch)
 			entry.success = success
 			if success then placed = placed + 1 end
 			completed = completed + 1
-			if completed >= #batch then done:Fire() end
 		end)
 	end
 
-	if #batch > 0 then done.Event:Wait() end
-	done:Destroy()
+	while completed < #batch do task.wait() end
 	return placed
 end
 
-local function placeStackedBlockBatch(stackedBatch)
+local function placeStackedBlockBatch(stackedBatch, waitForCompletion)
 	if not netManaged then return 0 end
 	if not placementHashName or not placementHashValue then
 		local ok = resolvePlacementHash(false)
@@ -1401,12 +1996,19 @@ local function placeStackedBlockBatch(stackedBatch)
 	local payloads = {}
 	for _, entry in ipairs(stackedBatch) do
 		entry.success = false
-		if entry.cframe and entry.name then
-			table.insert(payloads, { entry = entry, args = buildPlaceArgs(entry.cframe, entry.name) })
+		local blockCFrame = entry.cframe
+		local blockName = entry.name
+		if entry.block and entry.block.Parent then
+			blockCFrame = entry.block.CFrame
+			blockName = entry.block.Name
+		end
+		if blockCFrame and blockName then
+			table.insert(payloads, { entry = entry, args = buildPlaceArgs(blockCFrame, blockName) })
 		end
 	end
 
 	local fired = 0
+	local completed = 0
 	for _, payload in ipairs(payloads) do
 		local args = payload.args
 		payload.entry.success = true
@@ -1415,8 +2017,13 @@ local function placeStackedBlockBatch(stackedBatch)
 			pcall(function()
 				placeRemote:InvokeServer(args)
 			end)
+			if waitForCompletion then
+				completed = completed + 1
+			end
 		end)
 	end
+
+	while waitForCompletion and completed < #payloads do task.wait() end
 	return fired
 end
 
@@ -1424,18 +2031,134 @@ local function getGridKey(position)
 	return getPositionOnlyKey(position)
 end
 
+function getPreviewBlockHitboxes(block)
+	local hitboxes = {}
+	local hasHitboxes = false
+
+	for _, child in ipairs(block:GetChildren()) do
+		if child:IsA("BasePart") and child:GetAttribute("IsPreviewHitbox") == true then
+			hasHitboxes = true
+			local minPos, maxPos = getPartAabb(child)
+			table.insert(hitboxes, { part = child, min = minPos, max = maxPos })
+		end
+	end
+
+	if not hasHitboxes then
+		local minPos, maxPos = getPartAabb(block)
+		table.insert(hitboxes, { part = block, min = minPos, max = maxPos })
+	end
+	return hitboxes
+end
+
+function hitboxesOverlapEnough(first, second)
+	local overlapX = math.min(first.max.X, second.max.X) - math.max(first.min.X, second.min.X)
+	local overlapY = math.min(first.max.Y, second.max.Y) - math.max(first.min.Y, second.min.Y)
+	local overlapZ = math.min(first.max.Z, second.max.Z) - math.max(first.min.Z, second.min.Z)
+	return overlapX > HITBOX_MERGE_OVERLAP
+		and overlapY > HITBOX_MERGE_OVERLAP
+		and overlapZ > HITBOX_MERGE_OVERLAP
+end
+
+function previewEntriesOverlapEnough(firstEntry, secondEntry)
+	for _, firstHitbox in ipairs(firstEntry.hitboxes) do
+		for _, secondHitbox in ipairs(secondEntry.hitboxes) do
+			if hitboxesOverlapEnough(firstHitbox, secondHitbox) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+function getHitboxCandidateCells(hitboxes)
+	local cells = {}
+	for _, hitbox in ipairs(hitboxes) do
+		local minX = math.floor(hitbox.min.X / BLOCK_SIZE)
+		local minY = math.floor(hitbox.min.Y / BLOCK_SIZE)
+		local minZ = math.floor(hitbox.min.Z / BLOCK_SIZE)
+		local maxX = math.floor(hitbox.max.X / BLOCK_SIZE)
+		local maxY = math.floor(hitbox.max.Y / BLOCK_SIZE)
+		local maxZ = math.floor(hitbox.max.Z / BLOCK_SIZE)
+
+		for x = minX, maxX do
+			for y = minY, maxY do
+				for z = minZ, maxZ do
+					cells[string.format("%d:%d:%d", x, y, z)] = true
+				end
+			end
+		end
+	end
+	return cells
+end
+
 local function buildPasteQueues(previewBlocks)
+	local entries = {}
+	local parent = {}
+	local firstIndexesByCell = {}
+
+	local function find(index)
+		while parent[index] ~= index do
+			parent[index] = parent[parent[index]]
+			index = parent[index]
+		end
+		return index
+	end
+
+	local function union(a, b)
+		local rootA = find(a)
+		local rootB = find(b)
+		if rootA ~= rootB then parent[rootB] = rootA end
+	end
+
+	for index, block in ipairs(previewBlocks) do
+		local blockCFrame = block.CFrame
+		local rootKey = block:GetAttribute("StackPositionKey") or getGridKey(blockCFrame.Position)
+
+		parent[index] = index
+		entries[index] = {
+			block = block,
+			name = block.Name,
+			cframe = blockCFrame,
+			gridKey = rootKey,
+			mergeKey = rootKey,
+			hitboxes = getPreviewBlockHitboxes(block)
+		}
+
+		local candidateIndexes = {}
+		local candidateCells = getHitboxCandidateCells(entries[index].hitboxes)
+		for cellKey in pairs(candidateCells) do
+			local cellIndexes = firstIndexesByCell[cellKey]
+			if cellIndexes then
+				for _, otherIndex in ipairs(cellIndexes) do
+					candidateIndexes[otherIndex] = true
+				end
+			end
+		end
+
+		for otherIndex in pairs(candidateIndexes) do
+			if previewEntriesOverlapEnough(entries[index], entries[otherIndex]) then
+				union(index, otherIndex)
+			end
+		end
+
+		for cellKey in pairs(candidateCells) do
+			if not firstIndexesByCell[cellKey] then
+				firstIndexesByCell[cellKey] = {}
+			end
+			table.insert(firstIndexesByCell[cellKey], index)
+		end
+	end
+
 	local groups = {}
 	local order = {}
-	for _, block in ipairs(previewBlocks) do
-		local blockCFrame = block.CFrame
-		local key = block:GetAttribute("StackPositionKey") or getGridKey(blockCFrame.Position)
-		if not groups[key] then
-			groups[key] = {}
-			groups[key].gridKey = key
-			table.insert(order, key)
+	for index, entry in ipairs(entries) do
+		local root = find(index)
+		if not groups[root] then
+			groups[root] = {}
+			groups[root].gridKey = entry.mergeKey or entry.gridKey
+			table.insert(order, root)
 		end
-		table.insert(groups[key], { block = block, name = block.Name, cframe = blockCFrame, gridKey = key })
+		table.insert(groups[root], entry)
 	end
 
 	table.sort(order, function(a, b)
@@ -1468,6 +2191,21 @@ local function countStackedEntries(stackedBatches)
 	return total
 end
 
+local function groupStackedBatchesBySize(stackedBatches)
+	local batchesBySize = {}
+	local sizes = {}
+	for _, batch in ipairs(stackedBatches) do
+		local size = #batch
+		if not batchesBySize[size] then
+			batchesBySize[size] = {}
+			table.insert(sizes, size)
+		end
+		table.insert(batchesBySize[size], batch)
+	end
+	table.sort(sizes)
+	return batchesBySize, sizes
+end
+
 local function removeSuccessfulPreviewBlocks(batch)
 	for _, entry in ipairs(batch) do
 		if entry.success and entry.block and entry.block.Parent then
@@ -1489,6 +2227,16 @@ local function requestPasteStep(action)
 	end
 	pasteStepAction = action
 	pasteStepEvent:Fire()
+end
+
+local function stopPaste()
+	if pasteInProgress then
+		pasteInProgress = false
+		pasteStepEvent:Fire()
+		notify("Paste", "Paste stopped.", 3)
+	else
+		notify("Paste", "No paste is running.", 3)
+	end
 end
 
 local function waitForPasteStep()
@@ -1581,6 +2329,94 @@ Mouse.Button1Up:Connect(function()
 	DragStatus:SetDesc("drag complete")
 end)
 
+-- UI - Online Builds
+
+OnlineBuilds.Dropdown = OnlineBuilds.Section:AddDropdown("OnlineBuildList", {
+	Title = "Build Name",
+	Values = {},
+	Multi = false
+})
+OnlineBuilds.Dropdown:OnChanged(function(value)
+	if type(value) == "string" and OnlineBuilds.Entries[value] then
+		OnlineBuilds.Selected = value
+		OnlineBuilds.Status:SetDesc("selected: " .. value)
+	end
+end)
+
+OnlineBuilds.Section:AddButton({
+	Title = "Refresh Online Builds",
+	Description = "downloads the latest list from GitHub",
+	Callback = function()
+		local ok, result = OnlineBuilds.Refresh()
+		if ok then
+			notify("Online Builds", string.format("Found %d build(s).", result), 3)
+		else
+			notify("Online Builds", tostring(result), 5)
+		end
+	end
+})
+
+OnlineBuilds.Section:AddButton({
+	Title = "Open 3D Preview Window",
+	Description = "drag the model to orbit; use the wheel to zoom",
+	Callback = function()
+		local entry = OnlineBuilds.Selected and OnlineBuilds.Entries[OnlineBuilds.Selected]
+		local decoded, resolveError = OnlineBuilds.ResolveData(entry)
+		if not decoded then
+			notify("Online Builds", tostring(resolveError), 5)
+			return
+		end
+
+		local ok, shownOrError, missingCount = OnlineBuilds.OpenViewer(
+			OnlineBuilds.Selected or "Online Build",
+			decoded
+		)
+		if ok then
+			OnlineBuilds.Status:SetDesc(string.format(
+				"viewing %s | %d shown | %d missing display type(s)",
+				OnlineBuilds.Selected,
+				shownOrError,
+				missingCount
+			))
+		else
+			notify("3D Preview", tostring(shownOrError), 5)
+		end
+	end
+})
+
+OnlineBuilds.Section:AddButton({
+	Title = "Load Into Auto Builder",
+	Description = "loads the selected build into the normal movable preview",
+	Callback = function()
+		local entry = OnlineBuilds.Selected and OnlineBuilds.Entries[OnlineBuilds.Selected]
+		local decoded, resolveError = OnlineBuilds.ResolveData(entry)
+		if not decoded then
+			notify("Online Builds", tostring(resolveError), 5)
+			return
+		end
+
+		local ok, result = loadDecodedSchematic(decoded)
+		if ok then
+			notify("Online Builds", string.format("Loaded %d blocks into the auto builder.", result), 4)
+		else
+			notify("Online Builds", tostring(result), 5)
+		end
+	end
+})
+
+OnlineBuilds.Section:AddButton({
+	Title = "Close 3D Preview Window",
+	Description = "",
+	Callback = function()
+		if OnlineBuilds.ViewerGui then OnlineBuilds.ViewerGui:Destroy(); OnlineBuilds.ViewerGui = nil end
+	end
+})
+
+task.spawn(function()
+	local ok, result = OnlineBuilds.Refresh()
+	if not ok then OnlineBuilds.Status:SetDesc(tostring(result)) end
+end)
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- UI — Remote
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1667,7 +2503,7 @@ SelectionSection:AddButton({
 		local copied = 0
 		for _, block in ipairs(blocks) do
 			if spawnPreviewBlock(block.Name, block.CFrame) then copied = copied + 1 end
-			if copied % previewLoadYieldEvery == 0 then
+			if copied > 0 and copied % previewLoadYieldEvery == 0 then
 				PreviewStatus:SetDesc(string.format("copying selection... %d block(s)", copied))
 				task.wait()
 			end
@@ -1807,7 +2643,7 @@ local BuildCollisionToggle = PreviewSection:AddToggle("BuildCollision", {
 })
 BuildCollisionToggle:OnChanged(function(value)
 	buildCollision = value
-	for _, block in ipairs(getPreviewBlocks()) do block.CanCollide = buildCollision end
+	for _, block in ipairs(getPreviewBlocks()) do syncPreviewBlockCollision(block) end
 end)
 
 local DragPreviewToggle = PreviewSection:AddToggle("DragPreviewEnabled", {
@@ -1954,6 +2790,25 @@ PasteSection:AddInput("PasteBatchSize", {
 	end
 })
 
+local FreezeRenderingToggle = PasteSection:AddToggle("FreezeRenderingDuringPaste", {
+	Title = "Freeze Rendering While Sending",
+	Default = false
+})
+FreezeRenderingToggle:OnChanged(function(value)
+	freezeRenderingDuringPaste = value
+	if not value then
+		pasteRenderPauseId = pasteRenderPauseId + 1
+		pcall(function()
+			RunService:Set3dRenderingEnabled(true)
+		end)
+	end
+	notify(
+		"Paste",
+		value and "Rendering will pause during each remote burst." or "Rendering pause disabled.",
+		3
+	)
+end)
+
 local autoUpgradeFromSchematicTotemData
 
 local function pastePreview()
@@ -1969,12 +2824,103 @@ local function pastePreview()
 
 	task.spawn(function()
 		local normalPending, stackedBatches = buildPasteQueues(previewBlocks)
+		local stackedBatchesBySize, stackedSizes = groupStackedBatchesBySize(stackedBatches)
 		local stackedTotal = countStackedEntries(stackedBatches)
 		local total          = #previewBlocks
 		local placed         = 0
 		local noProgressLoops = 0
 
-		setPasteStatus(string.format("normal blocks: %d | stacked cells: %d | stacked remotes: %d", #normalPending, #stackedBatches, stackedTotal))
+		setPasteStatus(string.format(
+			"multi-place sizes: %d | multi-place cells: %d | normal blocks last: %d | stacked remotes: %d",
+			#stackedSizes,
+			#stackedBatches,
+			#normalPending,
+			stackedTotal
+		))
+
+		local function processStackedStage(batches, stageName)
+			for batchIndex, stackedBatch in ipairs(batches) do
+				if not pasteInProgress then break end
+				local batchPlaced = 0
+				setPasteStatus(string.format(
+					"%s %d/%d (%s) ready; Next spawns %d remote task(s)",
+					stageName,
+					batchIndex,
+					#batches,
+					tostring(stackedBatch.gridKey or "cell"),
+					#stackedBatch
+				))
+				notify("Paste", string.format("%s %d ready. Press Next to place it.", stageName, batchIndex), 4)
+
+				while pasteInProgress do
+					pasteWaitingForStep = true
+					local action = waitForPasteStep()
+					if action == "stop" then break end
+					if action == "redo" then
+						setPasteStatus(string.format(
+							"%s %d/%d (%s) has not fired yet; press Next first",
+							stageName,
+							batchIndex,
+							#batches,
+							tostring(stackedBatch.gridKey or "cell")
+						))
+						continue
+					end
+					batchPlaced = runWithPasteRenderingPaused(function()
+						return placeStackedBlockBatch(stackedBatch, freezeRenderingDuringPaste)
+					end)
+					task.wait()
+					placed = placed + batchPlaced
+					break
+				end
+				if not pasteInProgress then break end
+
+				setPasteStatus(string.format(
+					"%s %d/%d (%s) spawned %d remote task(s); press Next or Redo",
+					stageName,
+					batchIndex,
+					#batches,
+					tostring(stackedBatch.gridKey or "cell"),
+					batchPlaced
+				))
+				notify("Paste", string.format("%s %d fired. Press Next or Redo.", stageName, batchIndex), 4)
+
+				while pasteInProgress do
+					pasteWaitingForStep = true
+					local action = waitForPasteStep()
+					if action == "redo" then
+						batchPlaced = runWithPasteRenderingPaused(function()
+							return placeStackedBlockBatch(stackedBatch, freezeRenderingDuringPaste)
+						end)
+						task.wait()
+						setPasteStatus(string.format(
+							"redid %s %d/%d (%s): spawned %d remote task(s); press Next",
+							stageName,
+							batchIndex,
+							#batches,
+							tostring(stackedBatch.gridKey or "cell"),
+							batchPlaced
+						))
+					else
+						removeSuccessfulPreviewBlocks(stackedBatch)
+						break
+					end
+				end
+			end
+		end
+
+		for _, stackSize in ipairs(stackedSizes) do
+			if not pasteInProgress then break end
+			local batches = stackedBatchesBySize[stackSize]
+			local stageName = string.format("%d-placement", stackSize)
+			setPasteStatus(string.format(
+				"processing all %d-placement cells: %d cell(s)",
+				stackSize,
+				#batches
+			))
+			notify("Paste", string.format("Starting all %d-placement cells.", stackSize), 3)
+			processStackedStage(batches, stageName)
+		end
 
 		while pasteInProgress and #normalPending > 0 do
 			local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -1996,7 +2942,12 @@ local function pastePreview()
 				end
 			end
 
-			local batchPlaced = placeBlockBatch(batch)
+			local batchPlaced = 0
+			if #batch > 0 then
+				batchPlaced = runWithPasteRenderingPaused(function()
+					return placeBlockBatch(batch)
+				end)
+			end
 			for _, entry in ipairs(batch) do
 				if entry.success then
 					if entry.block and entry.block.Parent then entry.block:Destroy() end
@@ -2018,72 +2969,6 @@ local function pastePreview()
 					noProgressLoops = 0
 				end
 				task.wait(0.75)
-			end
-		end
-
-		if pasteInProgress and #stackedBatches > 0 then
-			setPasteStatus("normal blocks done; stacked cells are paused")
-			task.wait(2)
-		end
-
-		for batchIndex, stackedBatch in ipairs(stackedBatches) do
-			if not pasteInProgress then break end
-			local batchPlaced = 0
-			setPasteStatus(string.format(
-				"stacked cell %d/%d (%s) ready; Next spawns %d remote task(s)",
-				batchIndex,
-				#stackedBatches,
-				tostring(stackedBatch.gridKey or "cell"),
-				#stackedBatch
-			))
-			notify("Paste", string.format("Stacked cell %d ready. Press Next to place it.", batchIndex), 4)
-
-			while pasteInProgress do
-				pasteWaitingForStep = true
-				local action = waitForPasteStep()
-				if action == "stop" then break end
-				if action == "redo" then
-					setPasteStatus(string.format(
-						"stacked cell %d/%d (%s) has not fired yet; press Next first",
-						batchIndex,
-						#stackedBatches,
-						tostring(stackedBatch.gridKey or "cell")
-					))
-					continue
-				end
-				batchPlaced = placeStackedBlockBatch(stackedBatch)
-				task.wait()
-				placed = placed + batchPlaced
-				break
-			end
-			if not pasteInProgress then break end
-
-			setPasteStatus(string.format(
-				"stacked cell %d/%d (%s) spawned %d remote task(s); press Next or Redo",
-				batchIndex,
-				#stackedBatches,
-				tostring(stackedBatch.gridKey or "cell"),
-				batchPlaced
-			))
-			notify("Paste", string.format("Stacked cell %d fired. Press Next or Redo.", batchIndex), 4)
-
-			while pasteInProgress do
-				pasteWaitingForStep = true
-				local action = waitForPasteStep()
-				if action == "redo" then
-					batchPlaced = placeStackedBlockBatch(stackedBatch)
-					task.wait()
-					setPasteStatus(string.format(
-						"redid stacked cell %d/%d (%s): spawned %d remote task(s); press Next",
-						batchIndex,
-						#stackedBatches,
-						tostring(stackedBatch.gridKey or "cell"),
-						batchPlaced
-					))
-				else
-					removeSuccessfulPreviewBlocks(stackedBatch)
-					break
-				end
 			end
 		end
 
@@ -2120,13 +3005,55 @@ PasteSection:AddButton({
 PasteSection:AddButton({
 	Title = "Stop Paste", Description = "",
 	Callback = function()
-		if pasteInProgress then
-			pasteInProgress = false
-			pasteStepEvent:Fire()
-			notify("Paste", "Paste stopped.", 3)
-		else notify("Paste", "No paste is running.", 3) end
+		stopPaste()
 	end
 })
+
+local function normalizeConsoleCommand(message)
+	local text = tostring(message or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+	text = text:gsub("^%[.-%]%s*", "")
+	text = text:gsub("^cmd:%s*", "")
+	if text == "next" or text == "n" or text == "build next" then return "next" end
+	if text == "redo" or text == "r" or text == "retry" or text == "repeat" then return "redo" end
+	if text == "stop" or text == "cancel" then return "stop" end
+	if text == "paste" or text == "start" or text == "start build" then return "paste" end
+	return nil
+end
+
+local function runConsolePasteCommand(command)
+	local now = os.clock()
+	if command == lastConsoleCommand and (now - lastConsoleCommandAt) < 0.05 then return end
+	lastConsoleCommand = command
+	lastConsoleCommandAt = now
+
+	if command == "next" then
+		requestPasteStep("next")
+	elseif command == "redo" then
+		requestPasteStep("redo")
+	elseif command == "stop" then
+		stopPaste()
+	elseif command == "paste" then
+		pastePreview()
+	end
+end
+
+LogService.MessageOut:Connect(function(message)
+	if not consoleCommandMode then return end
+	local command = normalizeConsoleCommand(message)
+	if command then runConsolePasteCommand(command) end
+end)
+
+local ConsoleCommandToggle = PasteSection:AddToggle("ConsoleCommandMode", {
+	Title = "F9 Console Commands", Default = false
+})
+ConsoleCommandToggle:OnChanged(function(value)
+	consoleCommandMode = value
+	if value then
+		notify("Paste", "F9 commands on: next, redo, stop, paste/start.", 4)
+	else
+		notify("Paste", "F9 commands off.", 2)
+	end
+end)
 
 -- ─── Auto-upgrade from saved schematic TotemData ─────────────────────────────
 --[[
